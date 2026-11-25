@@ -7,6 +7,7 @@
 ## Version: @project-version@
 ## X-License: MIT (graphics and media: all rights reserved, see LICENSE)
 ## X-Website: https://github.com/even512/LucidVials
+## X-Curse-Project-ID: 1831561
 ## SavedVariables: LucidVialsDB
 ## Category: Unit Frames
 ## Category-deDE: Einheitenfenster
