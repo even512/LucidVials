@@ -1,0 +1,33 @@
+## Interface: 120105, 16001
+## Title: Lucid Vials
+## Notes: Player, target and target-of-target frames as bronze glass vials with sloshing liquid health and mana, plus an experience tube.
+## Notes-deDE: Spieler-, Ziel- und Ziel-des-Ziels-Rahmen als Glasphiolen in Bronze mit schwappender Flüssigkeit für Leben und Mana, dazu eine Erfahrungsröhre.
+## Author: EveN
+## IconTexture: Interface\AddOns\LucidVials\Media\icon
+## Version: @project-version@
+## X-License: MIT (graphics and media: all rights reserved, see LICENSE)
+## X-Website: https://github.com/even512/LucidVials
+## SavedVariables: LucidVialsDB
+## Category: Unit Frames
+## Category-deDE: Einheitenfenster
+
+Locales\enUS.lua
+Locales\deDE.lua
+Core.lua
+Compat.lua
+Store.lua
+Style.lua
+LiquidWave.lua
+Liquid.lua
+LiquidPhysics.lua
+LiquidFx.lua
+LiquidFizz.lua
+modules\UnitFrames\UnitFrames.lua
+modules\UnitFrames\Skin.lua
+modules\UnitFrames\Deco.lua
+modules\UnitFrames\XP.lua
+UI\ConfigWidgets.lua
+UI\CopyBox.lua
+UI\Config.lua
+UI\ConfigFrames.lua
+UI\ConfigSettings.lua

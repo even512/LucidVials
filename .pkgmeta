@@ -1,0 +1,32 @@
+# BigWigs packager configuration (https://github.com/BigWigsMods/packager/wiki/Preparing-the-PackageMeta-File)
+# The repository keeps the addon below addon/; the release zip contains it as one top-level folder:
+#   LucidVials/   the addon (MIT, graphics and media: all rights reserved)
+package-as: LucidVials
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+enable-nolib-creation: no
+
+move-folders:
+  LucidVials/addon/LucidVials: LucidVials
+
+# Everything outside the addon folder stays out of the zip.
+ignore:
+  - .github
+  - .gitignore
+  - .gitattributes
+  - .env.example
+  - docs
+  - scripts
+  - tests
+  - specs
+  - media
+  - node_modules
+  - CHECKPOINT.md
+  - README.md
+  - LICENSE
+  - package.json
+  - package-lock.json
+  - vitest.config.mjs

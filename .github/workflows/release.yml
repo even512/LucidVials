@@ -1,0 +1,51 @@
+# Release with the BigWigs packager.
+#   git tag v1.0.1-beta1 && git push origin v1.0.1-beta1   -> BETA   (tag contains "beta")
+#   git tag v1.0.1-alpha1 ...                              -> ALPHA  (tag contains "alpha")
+#   git tag v1.0.0 && git push origin v1.0.0               -> RELEASE (any other tag)
+# Always: a GitHub release with the zip is created (GITHUB_TOKEN).
+# CurseForge upload happens only if BOTH are set: the secret CF_API_KEY (CurseForge API token, as an ENVIRONMENT secret of the
+# environment "release": Settings > Environments > release; add required reviewers there, so no tag uploads without an approval)
+# AND the project number in the TOC (## X-Curse-Project-ID in addon/LucidVials/LucidVials.toc). If one is missing, the packager
+# skips CurseForge and the run still ends green with the GitHub release only. Packaging rules: .pkgmeta.
+# Check before a tag: npm ci && npm run check. Setup steps: docs/RELEASE.md (private repo only).
+# Actions are pinned to a commit SHA (the tag is named in the comment); update them deliberately, never via a moving tag.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# no permissions by default; the job below asks only for what it needs
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # create the GitHub release and attach the package
+    steps:
+      - name: Checkout (full history and tags, the packager needs them)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Report where the package goes
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+        run: |
+          if [ -z "$CF_API_KEY" ]; then
+            echo "::notice::CF_API_KEY is not set: no CurseForge upload, GitHub release only."
+          elif ! grep -Eq '^## X-Curse-Project-ID:[[:space:]]*[0-9]+' addon/LucidVials/LucidVials.toc; then
+            echo "::notice::No X-Curse-Project-ID in the TOC: no CurseForge upload, GitHub release only."
+          else
+            echo "::notice::CurseForge upload is on."
+          fi
+
+      - name: Package and upload
+        uses: BigWigsMods/packager@e50a250f8705041e40f2fa1ddcb280a686d65aa0 # v2.6.1
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
