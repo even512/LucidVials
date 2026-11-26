@@ -99,7 +99,10 @@ function target({ ox, oy, kind, skull, level, name }) {
     const [x, y, s] = vm.lua(`return { NS.UnitFrameDeco.SocketPlace(${size}, false) }`);
     html += img("uf-ring-aufnahme", pcx + x - s / 2, pcy - y - s / 2, s, s);
   } else html += img("uf-ring", pcx - size / 2, pcy - size / 2, size, size);
-  if (kind) html += img(`uf-ziel-${kind}-front`, pcx - (G.front * k) / 2, pcy - (G.front * k) / 2, G.front * k, G.front * k);
+  if (kind && G[kind].tall) {
+    const g = G[kind]; // Vorderlage im Rahmen der Hinterlage (Boss-Kamm)
+    html += img(`uf-ziel-${kind}-front`, pcx - g.cx * G.backW * k, pcy - g.cy * G.backH * k, G.backW * k, G.backH * k);
+  } else if (kind) html += img(`uf-ziel-${kind}-front`, pcx - (G.front * k) / 2, pcy - (G.front * k) / 2, G.front * k, G.front * k);
   // Raidmarker oben (grosse Fassung), Quest-Symbol oben aussen (kleine Fassung)
   const rm = (size / 2) * (R.inner + R.outer) / 2;
   const at = (deg) => [pcx + Math.cos((deg * Math.PI) / 180) * rm, pcy - Math.sin((deg * Math.PI) / 180) * rm];
@@ -108,7 +111,8 @@ function target({ ox, oy, kind, skull, level, name }) {
   const raid = pngUrl(readTga("uf-ziel-gem")); // Platzhalter-Kontrast: Stern als goldener Stein
   html += `<div style="${abs(mx - mi / 2, my - mi / 2, mi, mi, `background:radial-gradient(circle,#ffe680 0 35%,#d9a520 36% 55%,transparent 56%)`)}"></div>`;
   void raid;
-  const [qx, qy] = at(LT.questAngle), qs = size * LT.quest, qi = qs * LT.questIcon;
+  const [qx, qy] = at((kind && LT.questAngleKind[kind]) || LT.questAngle), // Platz je Zier wie Deco.lua placeQuest
+    qs = size * LT.quest, qi = qs * LT.questIcon;
   html += img("uf-ziel-marker-small", qx - qs / 2, qy - qs / 2, qs, qs);
   html += img("np-obj-slay", qx - qi / 2, qy - qi / 2, qi, qi);
   // Stufen-Plakette mit Stein

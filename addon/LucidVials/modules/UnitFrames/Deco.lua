@@ -11,8 +11,10 @@
 --   * Klassifikation (Ziel): Elite = Gold-Drache, Rar = Silber-Drache, Rar-Elite = Silber-Gold-Drache, Weltboss/Boss/Stufe
 --     ?? = Boss-Kamm (Hoerner + Totenkopf; bei ?? Totenkopf statt Zahl). Lucids uf-ring bleibt; jedes Teil liegt in zwei
 --     Lagen: hinten (unter dem Ring: Fluegel, Kopf, Schwanz) und vorn (ueber dem Ring: Krallen/Hals; der eigene Ring des
---     Teils ist per radialer Maske entfernt, scripts/gen-unitframe-media.mjs decoImages).
---   * Raidmarker oben auf dem Ring (grosse Fassung), Quest-Symbol oben aussen (kleine Fassung) - dieselben Symbole wie an
+--     Teils ist per radialer Maske entfernt, scripts/gen-unitframe-media.mjs decoImages). Boss: hinten die Hoerner (Ansatz
+--     unter dem Ring), vorn nur der Totenkopf unten mittig ueber dem Ringband (bossImages, ohne seitliche Dornen).
+--   * Raidmarker oben auf dem Ring (grosse Fassung), Quest-Symbol oben aussen (kleine Fassung; Boss: rechts zwischen Horn
+--     und Plakette) - dieselben Symbole wie an
 --     den Plaketten (Style.QuestSymbol: Questie zuerst, sonst "!" ueber C_QuestLog). Zeigt Lucid ein Questie-Symbol,
 --     wird Questies eigenes Symbol am Zielrahmen (profile.nameplateTargetFrameEnabled) per SetAlpha(0) verborgen.
 --   * Stufen-Plakette mit Edelstein in Schwierigkeitsfarbe (nur angreifbare Ziele, sonst neutral).
@@ -31,10 +33,11 @@ Skin.Deco = Deco
 
 local MEDIA = "Interface\\AddOns\\LucidVials\\Media\\"
 -- Lagen aus scripts/gen-unitframe-media.mjs zielMeasurements() (der Test vergleicht): Ringmitte (cx, cy) der Hinterlage
--- je Art, Plakette (Scheibenmitte/-radius, Stein-Fassung), Innenflaeche der Fassungen
+-- je Art (tall = Vorderlage im Rahmen der Hinterlage statt quadratisch um die Ringmitte), Plakette (Scheibenmitte/-radius,
+-- Stein-Fassung), Innenflaeche der Fassungen
 Deco.GEO = { rin = 76, backW = 256, backH = 512, front = 256,
     elite = { cx = 0.4099, cy = 0.4926 }, rare = { cx = 0.4291, cy = 0.4914 },
-    rareelite = { cx = 0.4234, cy = 0.4707 }, boss = { cx = 0.5025, cy = 0.5097 },
+    rareelite = { cx = 0.4234, cy = 0.4707 }, boss = { cx = 0.5025, cy = 0.5097, tall = true },
     level = { cx = 0.5, cy = 0.469, r = 0.4592, gx = 0.4991, gy = 0.8723 },
     aura = { inner = 0.7075 }, marker = { inner = 0.5729 },
     socket = { cx = 0.5512, cy = 0.4992, size = 1.0967, inner = 0.7837, outer = 0.9932,
@@ -54,8 +57,9 @@ Skin.PLATE.badge = 0.46
 -- UnitClassification -> Zier
 Deco.CLASS = { elite = "elite", rare = "rare", rareelite = "rareelite", worldboss = "boss" }
 -- Lage (Anteile des Ring-Aussendurchmessers bzw. der Plakette); Winkel in Grad gegen den Uhrzeigersinn ab rechts
+-- questAngleKind: eigener Platz je Zier (Boss: zwischen rechtem Horn und Stufen-Plakette, nicht auf dem Horn)
 Deco.LAYOUT = { marker = 0.32, markerAngle = 90, raidIcon = 1.15, quest = 0.26, questAngle = 36, questIcon = 0.66,
-    gem = 0.2, skull = 0.52, levelFont = 0.4 }
+    questAngleKind = { boss = 10 }, gem = 0.2, skull = 0.52, levelFont = 0.4 }
 Deco.GEM_NEUTRAL = { 0.80, 0.76, 0.70 }
 Deco.GEM_TEST = { 1.0, 0.50, 0.25 }
 -- Auren: Symbolgroesse aus dem Profil (unitframes.auraSize, Skin.AURA_SIZE); gap/rowGap gelten bei refSize und wachsen
@@ -429,8 +433,21 @@ local function polar(tex, ring, angle, radius, size)
     tex:SetSize(size, size)
 end
 
+--- Quest-Fassung: Platz haengt von der Zier ab (Boss-Hoerner)
+local function placeQuest(sk)
+    local Lt = Deco.LAYOUT
+    local size = sk.ringSize or 72
+    local rm = size / 2 * (Deco.RING.inner + Deco.RING.outer) / 2
+    local a = (sk.zKind and Lt.questAngleKind[sk.zKind]) or Lt.questAngle
+    local qa = Skin.SPEC.target.mirrored and a or (180 - a)
+    polar(sk.qSock, sk.ring, qa, rm, size * Lt.quest)
+    polar(sk.qIcon, sk.ring, qa, rm, size * Lt.quest * Lt.questIcon)
+    sk.qIconSize = size * Lt.quest * Lt.questIcon
+end
+
 local function placeKind(sk)
     local kind = sk.zKind
+    placeQuest(sk)
     if not kind then
         sk.zBack:Hide()
         sk.zFront:Hide()
@@ -445,8 +462,13 @@ local function placeKind(sk)
     sk.zBack:SetSize(G.backW * k, G.backH * k)
     sk.zFront:SetTexture(Deco.KIND_TEX[kind] .. "-front")
     sk.zFront:ClearAllPoints()
-    sk.zFront:SetPoint("CENTER", sk.ring, "CENTER", 0, 0)
-    sk.zFront:SetSize(G.front * k, G.front * k)
+    if g.tall then
+        sk.zFront:SetPoint("TOPLEFT", sk.ring, "CENTER", -g.cx * G.backW * k, g.cy * G.backH * k)
+        sk.zFront:SetSize(G.backW * k, G.backH * k)
+    else
+        sk.zFront:SetPoint("CENTER", sk.ring, "CENTER", 0, 0)
+        sk.zFront:SetSize(G.front * k, G.front * k)
+    end
     sk.zBack:Show()
     sk.zFront:Show()
 end
@@ -455,14 +477,9 @@ local function layoutTarget(sk)
     local Lt, G = Deco.LAYOUT, Deco.GEO
     local size = sk.ringSize or 72
     local rm = size / 2 * (Deco.RING.inner + Deco.RING.outer) / 2
-    local mirrored = Skin.SPEC.target.mirrored
     polar(sk.mSock, sk.ring, Lt.markerAngle, rm, size * Lt.marker)
     polar(sk.mIcon, sk.ring, Lt.markerAngle, rm, size * Lt.marker * G.marker.inner * Lt.raidIcon)
-    local qa = mirrored and Lt.questAngle or (180 - Lt.questAngle)
-    polar(sk.qSock, sk.ring, qa, rm, size * Lt.quest)
-    polar(sk.qIcon, sk.ring, qa, rm, size * Lt.quest * Lt.questIcon)
-    sk.qIconSize = size * Lt.quest * Lt.questIcon
-    placeKind(sk)
+    placeKind(sk) -- samt Quest-Fassung (Platz je Zier)
     if sk.plate then
         local ps = num(sk.plate, "GetWidth") or (sk.pw or 58) * Skin.PLATE.badge
         local P = G.level

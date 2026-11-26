@@ -34,7 +34,8 @@
 //   uf-glint.tga          256 x 64   wandernde Spiegelung (GLINT, prozedural, weiss): links Glasreflex (schraeger weicher
 //                                    Doppelstreifen), rechts Oberflaechenglanz (weicher Fleck); nur Alpha-Verlaeufe
 //   uf-ziel-<art>.tga     256 x 512  Ziel-Zier (elite, rare, rareelite, boss) aus ziel-*.png: Hinterlage (unter uf-ring)
-//   uf-ziel-<art>-front   256 x 256  Vorderlage (ueber uf-ring, eigener Ring des Teils radial entfernt), Ringmitte = Mitte
+//   uf-ziel-<art>-front   256 x 256  Vorderlage (ueber uf-ring, eigener Ring des Teils radial entfernt), Ringmitte = Mitte;
+//                                    Boss 256 x 512 im back-Rahmen (nur Totenkopf, siehe BOSS)
 //   uf-ziel-marker(-small), -gem, -aura 64 x 64, uf-ziel-level 128 x 128 (Kleinteile des Bogens)
 //   uf-ring-aufnahme.tga  512 x 512  Portraetring mit Rohraufnahmen (ring-aufnahme.png aus sheet-ring-aufnahme-v4.jpg,
 //                                    scripts/cut-ring-aufnahme.mjs) fuer Spieler/Ziel; Lage in Deco.GEO.socket
@@ -1092,8 +1093,57 @@ function ringProfile(img, ring, kind) {
   return prof;
 }
 
+// Boss-Kamm: eigener Schnitt statt Ringprofil-Maske. Im Bogen liegt die untere Gruppe (Totenkopf + seitliche Dornen) UEBER
+// dem eigenen Ring; die Maske zerhackte sie am Ringband (Schaedel-Stirn schwebte im Portraet, Kinn hing unter dem Ring),
+// die aeusseren Dornen lagen links hinter den Rohraufnahmen und rechts unter der Stufen-Plakette. Daher:
+//   back  = obere Gruppe (Hoerner, kleine Zacken) ab hornY, ab Ring-Innenkante (Hornansatz laeuft unter uf-ring = buendig),
+//   front = nur der Totenkopf mit seinen kleinen Hoernern (Fenster skull, weiche Kante soft), um scale verkleinert und so
+//           gerueckt, dass die Schaedeldecke (crown, Bogen) auf at liegt: unten mittig auf dem Ringband statt im Portraet,
+//           schmal genug fuer die Stufen-Plakette. Gleicher Rahmen wie back (tall = Vorderlage im back-Rahmen statt im
+//           quadratischen front-Rahmen). Seitliche Dornen fallen weg. Masse in rin, y nach oben, Ringmitte = 0.
+export const BOSS = { hornY: 0.6, skull: { halfW: 0.47, top: -0.5, horn: [0.42, 0.6, -0.9, -0.55] }, soft: 0.025,
+  crown: -0.72, at: -0.96, scale: 0.75 };
+
+/** Boss-Kamm -> { back, front, cx, cy, tall } (Lagen wie decoImages, front im back-Rahmen) */
+function bossImages(src, ring) {
+  const Z = ZIEL, B = BOSS, K = B.skull, { w, h } = src;
+  const backSrc = { w, h, rgba: new Uint8Array(src.rgba.length) };
+  const frontSrc = { w, h, rgba: new Uint8Array(src.rgba.length) };
+  // weiches Fenster: 1 innen, 0 ausserhalb, Rand ueber soft (rin)
+  const inside = (v, lo, hi) => smooth(v, lo - B.soft, lo + B.soft) * (1 - smooth(v, hi - B.soft, hi + B.soft));
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      if (src.rgba[o + 3] === 0) continue;
+      const xr = (x + 0.5 - ring.cx) / ring.rin, yr = (ring.cy - y - 0.5) / ring.rin, rr = Math.hypot(xr, yr);
+      const ax = Math.abs(xr);
+      let back = 0;
+      if (rr >= 1) back = smooth(yr, B.hornY - B.soft, B.hornY + B.soft);
+      const head = inside(ax, -1, K.halfW) * (1 - smooth(yr, K.top - B.soft, K.top + B.soft));
+      const horn = inside(ax, K.horn[0], K.horn[1]) * inside(yr, K.horn[2], K.horn[3]);
+      const front = Math.max(head, horn);
+      for (let c = 0; c < 3; c++) { backSrc.rgba[o + c] = src.rgba[o + c]; frontSrc.rgba[o + c] = src.rgba[o + c]; }
+      backSrc.rgba[o + 3] = Math.round(src.rgba[o + 3] * back);
+      frontSrc.rgba[o + 3] = Math.round(src.rgba[o + 3] * front);
+    }
+  }
+  const s = Z.rin / ring.rin;
+  const ox = Math.round((Z.backW - w * s) / 2), oy = Math.round((Z.backH - h * s) / 2);
+  const back = bleed(resampleLinear(backSrc, -ox / s, -oy / s, Z.backW / s, Z.backH / s, Z.backW, Z.backH));
+  // Anker Schaedeldecke: Quelle (Ringmitte x, crown) -> Ausgabe (Ringmitte x, at), dazwischen um scale verkleinert
+  const ss = s * B.scale, ax = ring.cx, ay = ring.cy - B.crown * ring.rin;
+  const outX = ox + ring.cx * s, outY = oy + (ring.cy - B.at * ring.rin) * s;
+  const front = bleed(resampleLinear(frontSrc, ax - outX / ss, ay - outY / ss, Z.backW / ss, Z.backH / ss, Z.backW,
+    Z.backH));
+  return { back, front, cx: (ox + ring.cx * s) / Z.backW, cy: (oy + ring.cy * s) / Z.backH, tall: true };
+}
+
 /** Zier-Teil -> { back, front, cx, cy } (cx/cy: Ringmitte in der back-Textur, Anteile) */
 export function decoImages(kind) {
+  if (kind === "boss") {
+    const src = loadSource("ziel-boss");
+    return bossImages(src, decoRing(src));
+  }
   const Z = ZIEL, src = loadSource("ziel-" + kind), ring = decoRing(src), prof = ringProfile(src, ring, kind);
   const n = prof.length, { w, h } = src;
   const backSrc = { w, h, rgba: new Uint8Array(src.rgba) };
@@ -1340,6 +1390,7 @@ export function zielMeasurements() {
   for (const k of ZIEL_KINDS) {
     const d = decoImages(k);
     out[k] = { cx: r4(d.cx), cy: r4(d.cy) };
+    if (d.tall) out[k].tall = true; // Vorderlage im back-Rahmen (Boss-Kamm)
   }
   const lv = levelGeometry();
   out.level = { cx: r4(lv.cx), cy: r4(lv.cy), r: r4(lv.r), gx: r4(lv.gx), gy: r4(lv.gy) };

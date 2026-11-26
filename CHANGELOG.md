@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- The boss ornament on the target portrait now sits cleanly on the ring, and the quest symbol no longer covers a horn.
+
 ## 1.0.1
 
 - In combat the liquid now takes the colour of the debuff's border: blue for magic, purple for curse, orange for disease, green for poison, red for everything else.
