@@ -38,7 +38,6 @@ Skin.TEST_DEBUFFS = { {}, { "Poison" }, { "Poison", "Curse" }, { "Magic", "Disea
 -- /vials test <wort>: Einzel-Effekte ohne echten Kampf (de/en); Bannarten zeigen ihre Schlieren LiquidFx.INK.testSecs s
 Skin.TEST_ARGS = { gift = { "Poison" }, poison = { "Poison" }, fluch = { "Curse" }, curse = { "Curse" },
     krankheit = { "Disease" }, disease = { "Disease" }, magie = { "Magic" }, magic = { "Magic" },
-    schwaechung = { "Weak" }, weak = { "Weak" },
     alle = { "Magic", "Curse", "Disease", "Poison" }, all = { "Magic", "Curse", "Disease", "Poison" },
     heilung = "heal", heal = "heal", treffer = "hit", hit = "hit", mana = "mana", schwappen = "slosh", slosh = "slosh",
     schild = "shield", shield = "shield",
@@ -579,11 +578,15 @@ local function layout(sk)
     local N = Skin.NAME
     local padT = (sk.health.pad and sk.health.pad.top) or 0
     sk.name:ClearAllPoints()
+    -- Zwei Anker (links und rechts an der Roehre): der Name ist so breit wie die Roehre und wird mit "..." gekuerzt
+    -- (SetWordWrap(false)), statt ueber Ring/Roehre hinauszulaufen. Die Seite, an der er buendig sitzt, bleibt wie bisher.
     if S.mirrored then
         sk.name:SetPoint("BOTTOMRIGHT", sk.health.root, "TOPRIGHT", -N.x, padT + N.y)
+        sk.name:SetPoint("BOTTOMLEFT", sk.health.root, "TOPLEFT", N.x, padT + N.y)
         sk.name:SetJustifyH("RIGHT")
     else
         sk.name:SetPoint("BOTTOMLEFT", sk.health.root, "TOPLEFT", N.x, padT + N.y)
+        sk.name:SetPoint("BOTTOMRIGHT", sk.health.root, "TOPRIGHT", -N.x, padT + N.y)
         sk.name:SetJustifyH("LEFT")
     end
     setFont(sk.name, S.nameSize)
@@ -617,12 +620,23 @@ local function powerTint(sk)
     return { tex = "mono", color = { math.min(1, c[1] * 1.1 + 0.05), math.min(1, c[2] * 1.1 + 0.05), math.min(1, c[3] * 1.1 + 0.05) } }
 end
 
+--- Anzeigename: In Forever liefert UnitName (Vorname, Nachname) - dann "Vorname Nachname". In Retail ist die zweite
+--- Rueckgabe der Realm (nie anhaengen). Nur zusammensetzen, wenn beide Teile lesbar sind (Compat.Str: nicht secret,
+--- nicht leer); sonst bleibt Blizzards Text (ggf. secret, dann unveraendert durchgereicht). NPCs ohne Nachnamen: unveraendert.
+local function composeName(vorname, nachname)
+    if not Compat.isForever then return vorname end
+    local a, b = Compat.Str(vorname), Compat.Str(nachname)
+    if a and b then return a .. " " .. b end
+    return vorname
+end
+
 local function updateText(sk)
     local u = SPEC[sk.id].unit
     -- Name und Stufe koennen secret sein: unveraendert an SetText (nil leert den Text); verglichen wird nur die lesbare
-    -- Zahl aus Compat.Num, nachdem Compat.IsSecret ausgeschlossen ist
-    local ok, name = pcall(UnitName, u)
-    if ok then pcall(sk.name.SetText, sk.name, name) else sk.name:SetText("") end
+    -- Zahl aus Compat.Num, nachdem Compat.IsSecret ausgeschlossen ist. Gesetzt wird nur unser eigener FontString (sk.name),
+    -- Blizzards Namens-Text bleibt unberuehrt (Alpha 0).
+    local ok, name, surname = pcall(UnitName, u)
+    if ok then pcall(sk.name.SetText, sk.name, composeName(name, surname)) else sk.name:SetText("") end
     if sk.levelText then
         local okL, lvl = pcall(UnitLevel, u)
         if not okL then

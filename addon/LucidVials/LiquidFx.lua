@@ -68,14 +68,14 @@ Fx.HIT = { dur = 1.6, flashW = 4.5, flashA = 0.7, flashT = 0.4, color = { 1.0, 0
 -- Blaeschen, Fluch leichtes Flackern der Toenung, Magie Funkeln. max = gemerkte Bannarten (vorherrschend = erste).
 -- testSecs = Dauer von /vials test <bannart>. secret: Farbe und Deckkraft aus der Kurve (Alpha 0 ohne Bannart).
 Fx.INK = { max = 4, tintFade = 2.5, tintDrift = 0.006, tintSpan = 1,
-    tintA = { Poison = 0.92, Disease = 0.8, Curse = 0.8, Magic = 0.8, Weak = 0.5 }, secretA = 0.8,
-    dim = { Poison = 0.35, Disease = 0.85, Curse = 0.72, Magic = 0.78, Weak = 0.7 }, secretDim = 0.75,
+    tintA = { Poison = 0.92, Disease = 0.8, Curse = 0.8, Magic = 0.8 }, secretA = 0.8,
+    dim = { Poison = 0.35, Disease = 0.85, Curse = 0.72, Magic = 0.78 }, secretDim = 0.75,
     -- secret: schwarze Kurven-Lage statt bodyDim (Deckkraft je Art, 0 ohne Bannart)
     darkA = { Poison = 0.6, Disease = 0.1, Curse = 0.2, Magic = 0.15 },
     -- Oberflaechenlicht (Lichtband der Kolben-Kammer, sonst immer in Fluessigkeitsfarbe gruen) je Art umfaerben (lesbar):
     -- das helle gruene Band ueber der Toenung war der Grund, warum Gift kaum zu sehen war (Spieltest)
     glow = { Poison = { 0.16, 0.34, 0.08 }, Disease = { 0.95, 0.85, 0.3 }, Curse = { 0.7, 0.35, 0.95 },
-        Magic = { 0.35, 0.6, 1.0 }, Weak = { 0.55, 0.5, 0.48 } }, glowMix = 0.85,
+        Magic = { 0.35, 0.6, 1.0 } }, glowMix = 0.85,
     -- Gift: "giftig-trueb mit Blasen" - leuchtende Blasen (Pool, Groesse px, Steigzeit s, Abstand s, Farbe) und kraenkliches
     -- Pulsieren (Hz, Tiefe) der Truebung und des Leuchtens
     poison = { bubbles = 7, sizeMin = 3, sizeMax = 6, riseMin = 2.0, riseMax = 3.5, every = 0.35, wobble = 0.8, wobbleHz = 0.7,
@@ -84,10 +84,10 @@ Fx.INK = { max = 4, tintFade = 2.5, tintDrift = 0.006, tintSpan = 1,
     testSecs = 10,
     order = { "Magic", "Curse", "Disease", "Poison" },
     colors = { Magic = { 0.20, 0.45, 1.0 }, Curse = { 0.55, 0.20, 0.85 }, Disease = { 0.90, 0.75, 0.15 },
-        Poison = { 0.05, 0.15, 0.03 },
-        -- Weak: neutrale Schwaechung im Kampf, wenn Forever die Bannart sperrt (18.11.: "irgendwas, das verraet, der
-        -- Charakter leidet, ohne komisch zu wirken") - stumpf, aschig, Koerper etwas abgedunkelt; nach dem Kampf echte Farbe
-        Weak = { 0.32, 0.28, 0.30 } },
+        Poison = { 0.05, 0.15, 0.03 } },
+    -- Bannart nicht bestimmbar (Forever im Kampf: secret, Kurve wirft): KEINE Toenung, keine Schlieren, keine Abdunklung
+    -- (Delta "Kampf-Debuff" 26.11., der fruehere graue Schleier "Weak" stoerte); die echte Farbe kommt mit der ersten
+    -- lesbaren Abtastung (UNIT_AURA bzw. PLAYER_REGEN_ENABLED nach dem Kampf).
     ids = { Magic = 1, Curse = 2, Disease = 3, Poison = 4 }, idsVerified = false, debounce = 0.15, scanMax = 40,
     learnMax = 15 }
 -- Dispel-Typ-IDs (fuer die Farbkurve bei secret dispelName): Blizzard baut die Kurve nirgends mit festen x-Werten
@@ -183,6 +183,14 @@ function Fx.Attach(lb)
         fx.tintS[i], fx.darkS[i] = t, d
     end
     fx.dark = fx.darkS[1]
+    -- Rahmen-Toenung im Kampf (LiquidBorder.lua): je Debuff eine Ebene aus Blizzards Rahmenbild, beide Wege in der
+    -- Fluessigkeit wie tintS (fillIn BORDER unter Abdeckung/Luft, Kapselmaske fillMask): die Form folgt exakt der
+    -- Fluessigkeit (Clip lb.fill am Fuellungsende, Meniskus/Welle durch die Abdeckung), nie ueber leeres Glas
+    fx.borderL, fx.borderN = {}, 0
+    local BD = ns.LiquidBorder
+    if BD then
+        for i = 1, Fx.INK.max do fx.borderL[i] = BD.NewLayer(lb.fillIn, lb.fillMask, "BORDER", 1) end
+    end
     -- Gift-Blasen: eigener Frame (Puls/Ausblenden), Farbe je Blase (lesbar Leuchtgruen, secret aus der Gift-Kurve)
     local PO = Fx.INK.poison
     local pf = CreateFrame("Frame", nil, clip)
@@ -263,6 +271,8 @@ function Fx.Configure(lb, role, on, debuffs)
         fx.extra:Hide()
         fx.tintA, fx.tintSecret, fx.tintTarget, fx.extraKind = 0, false, nil, nil
         for i = 1, #fx.tintS do fx.tintS[i]:Hide(); fx.darkS[i]:Hide() end
+        for i = 1, #fx.borderL do ns.LiquidBorder.Hide(fx.borderL[i]) end
+        fx.borderN = 0
         fx.pWant, fx.pA = false, 0
         fx.pFrame:Hide()
         for i = 1, #fx.pB do fx.pOn[i] = false; fx.pB[i]:Hide() end
@@ -355,7 +365,22 @@ function Fx.Layout(lb)
     fx.tint:ClearAllPoints()
     fx.tint:SetAllPoints(lb.fillIn)
     fx.tintTile = math.max(0.2, (lb.w or 100) / (ns.Liquid.PISTON.bodyTile * h))
+    Fx.LayoutBorder(lb)
     if fx.fizz then ns.LiquidFizz.Layout(lb) end
+end
+
+--- Rahmen-Toenung legen (Weg "clip"): Streifen gestreckt ueber die ganze Flaeche von fillIn (Roehre + Ueberstand lb.under
+--- je Seite, volle Hoehe wie tintS); was darueber hinausragt, schneidet die Kapselmaske (CLAMPTOBLACKADDITIVE) und der
+--- Fluessigkeits-Clip ab. Bei Layout und bei jeder Aenderung des Ausschnitts, nie pro Bild.
+function Fx.LayoutBorder(lb)
+    local fx, BD = lb.fx, ns.LiquidBorder
+    if not (fx and BD and #fx.borderL > 0) then return end
+    local strip = BD.Strip()
+    local u = lb.under or 0
+    for i = 1, #fx.borderL do
+        BD.Place(fx.borderL[i], lb.fillIn, (lb.w or 100) + 2 * u, lb.h or 10, 0, strip)
+    end
+    fx.borderStrip = strip
 end
 
 -- Werte (aus Liquid.SetValue/SetMax/Snap*) ------------------------------------------------------------------------------
@@ -848,9 +873,12 @@ end
 function Fx.DebugLines()
     local out = {}
     local ids, src = dispelIds()
-    out[#out + 1] = string.format("frames.ink n=%d secret=%d quelle=%s magie=%s fluch=%s krankheit=%s gift=%s",
-        inkState.n or 0, inkState.secret or 0, tostring(src), tostring(ids.Magic), tostring(ids.Curse), tostring(ids.Disease),
-        tostring(ids.Poison))
+    local BD = ns.LiquidBorder
+    local strip = BD and BD.Strip() or nil
+    out[#out + 1] = string.format("frames.ink n=%d secret=%d quelle=%s magie=%s fluch=%s krankheit=%s gift=%s rahmen=%d"
+        .. " rahmen.weg=%s rahmen.quelle=%s", inkState.n or 0, inkState.secret or 0, tostring(src), tostring(ids.Magic),
+        tostring(ids.Curse), tostring(ids.Disease), tostring(ids.Poison), inkState.border or 0,
+        strip and strip.mode or "-", strip and strip.src or "-")
     for k = 1, Fx.LOG_MAX do
         local idx = (logHead + k - 1) % Fx.LOG_MAX + 1
         if logLines[idx] then out[#out + 1] = "frames.ink.log " .. logLines[idx] end
@@ -859,6 +887,8 @@ function Fx.DebugLines()
 end
 
 function Fx.ScanDebuffs()
+    -- Rahmen-Geometrie einmal ausserhalb des Kampfs messen (LiquidBorder; im Kampf no-op, danach gemerkt)
+    if ns.LiquidBorder then pcall(ns.LiquidBorder.Measure) end -- gemerkt; ohne Treffer gedrosselt neu
     local list, branch = harmful()
     if not list then
         list = blizzDebuffs()
@@ -932,20 +962,46 @@ function Fx.ScanDebuffs()
     elseif #secretIds > 0 then
         for _ = 1, #secretIds do results[#results + 1] = "secret:keine-kurve" end
     end
-    -- Bannart nicht ermittelbar (Kampf-Sperre: Kurve gesperrt/fehlt, secret ohne ID): neutrale Schwaechung, wenn sonst nichts
+    -- Farbe aus Blizzards Debuff-Rahmen (LiquidBorder, Delta "Kampf-Toenung" 26.11.): je Knopf der Leiste (Reihenfolge der
+    -- Leiste, hoechstens freie Ebenen) nach LiquidBorder.Classify - secret Atlas => Rahmen-Ebene, lesbarer Farb-Rahmen =>
+    -- eigene Palette dieser Art (schon gesehene Arten nicht doppelt). Unabhaengig von dispelName/debuffType (Kampftest:
+    -- im Kampf auch lesbar nil). Fehlt die Leiste oder wirft etwas: ohne Toenung (kein grauer Schleier).
+    -- Zuordnung Knopf <-> Aura ist nicht sicher moeglich (auraInstanceID secret, nicht vergleichbar): darum der Rahmen-Weg NUR,
+    -- wenn keine secret Aura ueber die Kurve geklaert wurde (nSecret == 0); sonst gelten allein die Kurven-Farben (ein Rahmen
+    -- koennte die Farbe einer schon geklaerten Aura doppeln).
     local unresolved = 0
     for _, r in ipairs(results) do
         if r == "secret:kurve-fehl" or r == "secret:keine-kurve" or r == "secret:ohne-id" then unresolved = unresolved + 1 end
     end
-    if unresolved > 0 and #kinds == 0 then
-        kinds[1], colors[1] = "Weak", I.colors.Weak
-        results[#results + 1] = "neutral"
+    local nBorder = 0
+    if nSecret == 0 and #kinds < I.max and ns.LiquidBorder then
+        local okB, cands = pcall(ns.LiquidBorder.Candidates, I.scanMax)
+        if okB and type(cands) == "table" then
+            for _, info in ipairs(cands) do
+                if #kinds >= I.max then break end
+                local k = info.class
+                if k == "border" then
+                    kinds[#kinds + 1] = "border"
+                    colors[#colors + 1] = info -- { atlas = <secret>, vc = {...} }: nur an SetAtlas/SetVertexColor
+                    nBorder = nBorder + 1
+                elseif I.colors[k] and not seen[k] then
+                    seen[k] = true -- lesbarer Farb-Rahmen: eigene Palette (inkl. Gift-Blasen ueber inkState.poison)
+                    kinds[#kinds + 1] = k
+                    colors[#colors + 1] = I.colors[k]
+                    results[#results + 1] = "rahmen:" .. k
+                end
+            end
+        end
+        if not okB then results[#results + 1] = "rahmen:fehler"
+        elseif nBorder > 0 then results[#results + 1] = "rahmen:" .. nBorder end
     end
+    if unresolved > 0 and #kinds == 0 then results[#results + 1] = "ohne-toenung" end
     inkState.poisonCols, inkState.darkCols = poisonCols, darkCols
     inkState.poisonCol, inkState.darkCol = poisonCols[1] or nil, darkCols[1] or nil
     logScan(branch, #list, nSecretId, results)
     inkState.poison = seen.Poison == true
     inkState.n, inkState.kinds, inkState.colors, inkState.secret = #kinds, kinds, colors, nSecret
+    inkState.border = nBorder
     for lb in pairs(tubes) do
         if lb.fx and lb.fx.debuffs then Fx.ApplyInk(lb) end
     end
@@ -964,7 +1020,7 @@ function Fx.SetTestDebuffs(list)
     inkState.poisonCol, inkState.darkCol, inkState.poisonCols, inkState.darkCols = nil, nil, {}, {}
     inkState.poison = false
     for _, k in ipairs(kinds) do if k == "Poison" then inkState.poison = true end end
-    inkState.n, inkState.kinds, inkState.colors, inkState.secret = #kinds, kinds, colors, 0
+    inkState.n, inkState.kinds, inkState.colors, inkState.secret, inkState.border = #kinds, kinds, colors, 0, 0
     for lb in pairs(tubes) do
         if lb.fx and lb.fx.debuffs then Fx.ApplyInk(lb) end
     end
@@ -993,7 +1049,25 @@ function Fx.ApplyInk(lb)
         fx.darkS[i]:Hide()
     end
     fx.secretN = js
-    if inkState.n > 0 and kind == "secret" and col then
+    -- Rahmen-Ebenen (Kampf, Bannart secret): Blizzards Rahmenbild, nur Farbe (keine Abdunklung, Blasen oder Zusatz-Lage)
+    local jb, BD = 0, ns.LiquidBorder
+    if BD and #fx.borderL > 0 then
+        local strip = BD.Strip()
+        if strip ~= fx.borderStrip then Fx.LayoutBorder(lb) end -- Ausschnitt neu gemessen
+        for i = 1, inkState.n do
+            if inkState.kinds[i] == "border" and jb < #fx.borderL then
+                jb = jb + 1
+                local okP, painted = pcall(BD.Paint, fx.borderL[jb], inkState.colors[i], strip)
+                if not (okP and painted) then BD.Hide(fx.borderL[jb]) end
+            end
+        end
+        for i = jb + 1, #fx.borderL do BD.Hide(fx.borderL[i]) end
+    end
+    fx.borderN = jb
+    if inkState.n > 0 and kind == "border" then
+        if fx.tintSecret then fx.tint:Hide() end
+        fx.tintSecret, fx.tintTarget = false, nil -- eigene Palette blendet aus
+    elseif inkState.n > 0 and kind == "secret" and col then
         if not fx.tintSecret then fx.tint:Hide() end
         fx.tintSecret, fx.tintTarget = js > 0, nil
     elseif inkState.n > 0 and col then
@@ -1065,7 +1139,9 @@ local function runScan()
     scanQueued = false
     if debuffOn then pcall(Fx.ScanDebuffs) end
 end
-local function onAura(_, _, unit)
+local function onAura(_, event, unit)
+    -- Kampfende: die Bannart ist wieder lesbar => sofort echte Farbe (sonst erst beim naechsten UNIT_AURA)
+    if event == "PLAYER_REGEN_ENABLED" then unit = "player" end
     if unit ~= "player" or scanQueued or not debuffOn then return end
     scanQueued = true
     C_Timer.After(Fx.INK.debounce, runScan)
@@ -1087,6 +1163,7 @@ function Fx.UpdateDebuffListening()
         if not pcall(auraFrame.RegisterUnitEvent, auraFrame, "UNIT_AURA", "player") then
             pcall(auraFrame.RegisterEvent, auraFrame, "UNIT_AURA")
         end
+        pcall(auraFrame.RegisterEvent, auraFrame, "PLAYER_REGEN_ENABLED")
         -- nach Blizzards Debuff-Leiste neu lesen (Rueckfall-Quelle im Kampf ist erst danach aktuell); Nach-Haken, einmal
         local df = _G.DebuffFrame
         if not blizzHooked and type(df) == "table" and type(hooksecurefunc) == "function" and type(df.UpdateAuras) == "function" then
@@ -1095,6 +1172,7 @@ function Fx.UpdateDebuffListening()
         pcall(Fx.ScanDebuffs)
     else
         pcall(auraFrame.UnregisterEvent, auraFrame, "UNIT_AURA")
+        pcall(auraFrame.UnregisterEvent, auraFrame, "PLAYER_REGEN_ENABLED")
         inkState.n = 0
     end
 end

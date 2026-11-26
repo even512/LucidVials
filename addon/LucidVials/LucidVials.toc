@@ -21,6 +21,7 @@ Style.lua
 LiquidWave.lua
 Liquid.lua
 LiquidPhysics.lua
+LiquidBorder.lua
 LiquidFx.lua
 LiquidFizz.lua
 modules\UnitFrames\UnitFrames.lua

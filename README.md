@@ -24,6 +24,13 @@ Options, AddOns, Lucid Vials).
 
 Settings are saved in `LucidVialsDB`.
 
+## Known problems
+
+- On WoW Forever the game hides the debuff type during combat. The liquid then takes the color from the game's own debuff
+  border (the debuff bar must be visible), and debuffs without a dispel type tint red, like the game's own border; the
+  extras of each type (poison bubbles, streaks, darkening) appear only once the type is readable again, at the latest when
+  combat ends.
+
 ## Development
 
 Node 20 or newer. `npm install`, then `npm run check` (Lua 5.1 syntax and upvalue limit), `npm test` (vitest with a fengari

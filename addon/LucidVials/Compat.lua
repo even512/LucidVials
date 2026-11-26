@@ -29,6 +29,12 @@ function Compat.Bool(v)
     return v ~= nil and v ~= false
 end
 
+--- Nichtleerer, lesbarer String aus einem API-Ergebnis: nil bei Secret Value, Nicht-String oder "".
+function Compat.Str(v)
+    if Compat.IsSecret(v) or type(v) ~= "string" or v == "" then return nil end
+    return v
+end
+
 --- Boolesche Abfrage obj:method(...) (z. B. IsMouseEnabled, IsForbidden, IsVisible, IsMouseOver).
 --- Liefert true/false, oder nil, wenn die Methode fehlt, wirft oder einen Secret Value liefert
 --- (Retail 12.x: Frame-Zustaende tief in Einheitenfenstern koennen secret sein; jeder Test darauf wirft).

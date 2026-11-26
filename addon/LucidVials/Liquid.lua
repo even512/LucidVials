@@ -717,6 +717,7 @@ function Liquid.Layout(lb, region, level, fallbackW, fallbackH)
     lb.bar:SetAllPoints(root)
     local T = Liquid.TUBE
     local u = F and 0 or math.floor(h * T.under + 0.5) -- np-frame: unter die Kappen; Kapselrahmen: Maske = Oeffnung
+    lb.under = u -- Ueberstand von fillIn/fillMask links und rechts (LiquidFx: Rahmen-Toenung)
     local function under(t)
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", root, "TOPLEFT", -u, 0)

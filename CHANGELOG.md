@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- In combat the liquid now takes the colour of the debuff's border: blue for magic, purple for curse, orange for disease, green for poison, red for everything else.
+- The grey veil in combat is gone.
+- In WoW Forever the frames show the full name with surname.
+
 ## 1.0.0
 
 - First release: the player, target and target-of-target frames become bronze glass vials with liquid health and resource.

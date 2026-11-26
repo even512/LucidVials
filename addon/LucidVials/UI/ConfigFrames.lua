@@ -23,7 +23,6 @@ Tab.TESTS = {
     { "UI_FRAMES_T_MANA", "mana", "UI_FRAMES_T_MANA_TIP" },
     { "UI_FRAMES_T_SLOSH", "slosh", "UI_FRAMES_T_SLOSH_TIP" },
     { "UI_FRAMES_T_SHIELD", "shield", "UI_FRAMES_T_SHIELD_TIP" },
-    { "UI_FRAMES_T_WEAK", "weak", "UI_FRAMES_T_WEAK_TIP" },
     { "UI_FRAMES_T_POISON", "poison", "UI_FRAMES_T_DEBUFF_TIP" },
     { "UI_FRAMES_T_CURSE", "curse", "UI_FRAMES_T_DEBUFF_TIP" },
     { "UI_FRAMES_T_DISEASE", "disease", "UI_FRAMES_T_DEBUFF_TIP" },
@@ -164,7 +163,7 @@ Config.RegisterPage("frames", {
             page.tests[#page.tests + 1] = testButton(page, L[t[1]], L[t[3]], t[2], BW, x, y)
         end
         page.stopBtn = W.Button(page, L.UI_FRAMES_TEST_STOP_ALL, 150, function() Tab.RunTest(page, "off") end)
-        page.stopBtn:SetPoint("TOPLEFT", 114, -428)
+        page.stopBtn:SetPoint("TOPLEFT", 0, -428)
         W.Tooltip(page.stopBtn, function() return L.UI_FRAMES_TEST_STOP_ALL, L.UI_FRAMES_TEST_STOP_ALL_TIP end)
 
         page.note = W.Text(page, "GameFontHighlightSmall", C.muted)
