@@ -322,10 +322,21 @@ local function powerType(unit)
     return ok and Compat.Num(pt) or nil
 end
 
+--- true, wenn das Maximum LESBAR ist und 0 (Einheit ohne diese Ressource): dann zeigen die eigenen Formate nichts statt
+--- "0 / 0" oder "0%". Ein secret Maximum bleibt unberuehrt (false) - die Kette laeuft wie bisher.
+local function noMax(api, src, kind, pt)
+    local ok, m = pcall(api.max, src, kind, pt)
+    return ok and Compat.Num(m) == 0
+end
+
 --- Wert einer Roehre setzen (secret-sicher). Liefert true, wenn die Kette lief.
 local function renderValue(e, unit)
     local api, src = source(e, unit)
     local pt = e.kind == "power" and powerType(e.values and "player" or unit) or nil
+    if noMax(api, src, e.kind, pt) then
+        clearAll(e)
+        return true
+    end
     local ok, pat, n, a, b = pcall(compose, api, src, e.kind, e.fmt, pt) -- ohne neue Closure je Ereignis
     if ok then ok = pcall(setAll, e, pat, n, a, b) end
     if not ok then clearAll(e) end
@@ -337,6 +348,11 @@ local function renderMirror(e, unit)
     local api, src = source(e, unit)
     local pt = e.kind == "power" and powerType(e.values and "player" or unit) or nil
     local fmt = Text.PatternFormat(e.kind, pt)
+    if noMax(api, src, e.kind, pt) then
+        clearAll(e)
+        e.hi:SetText("")
+        return true
+    end
     local split = e.split and fmt == "both" -- Blizzards Lage: Prozent links, Zahl rechts; mittig: beides zusammen
     -- Vorschau in Blizzards Lage: Anker an der Ersatz-Leiste (wie Blizzards TextString), sonst die Roehre
     local A = e.anchor

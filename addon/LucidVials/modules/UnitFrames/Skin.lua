@@ -61,7 +61,12 @@ Skin.TINTS = {
     friendly = { tex = "mono", color = { 0.46, 0.82, 0.30 } },
     tapped = { tex = "mono", color = { 0.58, 0.55, 0.52 } },
 }
-Skin.POWER_DEFAULT = { 0.20, 0.45, 1.0 } -- Mana, wenn PowerBarColor fehlt
+-- Ersatzfarbe fuer unbekannte Ressourcen-Tokens (PowerBarColor ohne Eintrag oder unlesbar): neutrales Hellblau. Nicht fuer Mana
+-- gedacht - Mana hat in PowerBarColor einen eigenen Eintrag und kommt von dort.
+Skin.POWER_DEFAULT = { 0.20, 0.45, 1.0 }
+-- Kinder von Blizzards ManaBar (parentKeys), die Reste ueber der Lucid-Roehre zeigen: Puls bei voller Ressource, Gewinn-/
+-- Verlust-Blitz, Kosten-Vorschau, Funke. Je Rahmen nur, wenn vorhanden (fehlen sie im Client, ist das kein Befund).
+Skin.MANA_PARTS = { "FullPowerFrame", "FeedbackFrame", "ManaCostPredictionBar", "Spark" }
 
 -- Je Rahmen: Einheit, Blizzard-Teile (parentKeys, Alpha 0), Name/Stufe/Portraet, Spiegelung (Portraet rechts), Plaettchen,
 -- Schriftgroesse, Ersatzmasse (wenn Groessen nicht lesbar sind)
@@ -339,6 +344,12 @@ local function hideBlizzard(sk)
     hideRegion(sk, sk.levelFs)
     hideRegion(sk, fillTexture(sk.hb))
     hideRegion(sk, fillTexture(sk.mb))
+    -- Reste der ManaBar: Blizzard animiert deren Alpha nur an den Texturen in den Kind-Frames (Spike-/Puls-Textur, Blitz-Texturen),
+    -- nie am Kind-Frame selbst; darum wird der Frame verdeckt (Kinder erben sein Alpha). Setzt Blizzard dessen Alpha neu
+    -- (FullPowerFrame:SetAlpha), greift der SetAlpha-Nachhaken aus hideRegion. Ausschalten: restoreBlizzard gibt alles frei.
+    if sk.mb then
+        for _, k in ipairs(Skin.MANA_PARTS) do hideRegion(sk, field(sk.mb, k)) end
+    end
 end
 
 -- Heil-Vorschau im Design (Liquid.AddHealGhost): Blizzards flache Fuellung der eigenen/fremden Vorschau (Segment .Fill) per
@@ -703,10 +714,20 @@ Skin.PreviewBuild = function(sk, root) return build(sk, root) end
 Skin.PreviewLayout = function(sk) return layout(sk) end
 Skin.PowerTint = function(sk) return powerTint(sk) end
 
+--- Schluessel der aktuellen Ressource (Token oder Typnummer als Text); nil, wenn nicht lesbar (secret) - dann kein Neufaerben
+local function powerKey(sk)
+    local ok, ptype, token = pcall(UnitPowerType, SPEC[sk.id].unit)
+    if not ok or Compat.IsSecret(ptype) or Compat.IsSecret(token) then return nil end
+    if type(token) == "string" then return token end
+    local n = Compat.Num(ptype)
+    return n and ("#" .. n) or nil
+end
+
 local function recolor(sk)
     if not sk.applied then return end
     Liquid.SetTint(sk.health, healthTint(sk))
     Liquid.SetTint(sk.power, powerTint(sk))
+    sk.powerKey = powerKey(sk)
 end
 
 --- Einheit neu: Farben, Texte, Werte einrasten
@@ -865,6 +886,12 @@ local function pollTot()
     if testActive or not unitExists("targettarget") then return end
     feed(sk, "maxhealth") -- Maximum mit nachziehen
     feed(sk, "maxpower")
+    -- Ressourcen-Typwechsel des Ziels des Ziels (kein UNIT_DISPLAYPOWER fuer targettarget): Toenung neu
+    local key = powerKey(sk)
+    if key and key ~= sk.powerKey then
+        sk.powerKey = key
+        Liquid.SetTint(sk.power, powerTint(sk))
+    end
 end
 
 local function ensureTot()

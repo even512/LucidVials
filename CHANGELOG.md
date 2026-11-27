@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Leftovers of Blizzard's power bar (full-resource pulse, gain/loss flash, cost preview, spark) no longer show on top of the power tube.
+- Your own number formats show nothing instead of "0 / 0" or "0%" for a unit without that resource.
+- The target-of-target tube now changes colour when its resource type changes.
+
 ## 1.1.0
 
 - Redesigned settings window with six tabs (General, Liquid, Portrait, Text & numbers, Font, Profiles) and its own values per frame.
