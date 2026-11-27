@@ -24,10 +24,10 @@ ns.Preview = Preview
 Skin.Preview = Preview
 
 Preview.SIZE = { w = 260, h = 200 }
-Preview.TESTS = { "heal", "hit", "mana", "slosh", "shield", "poison", "curse", "disease", "magic", "combat", "death", "low",
-    "numbers", "all" }
+Preview.TESTS = { "heal", "hit", "mana", "regen", "slosh", "shield", "poison", "curse", "disease", "magic", "combat", "death",
+    "low", "numbers", "all" }
 Preview.TESTS_BY_PAGE = { general = { "all" },
-    liquid = { "heal", "hit", "mana", "slosh", "shield", "poison", "curse", "disease", "magic" },
+    liquid = { "heal", "hit", "mana", "regen", "slosh", "shield", "poison", "curse", "disease", "magic" },
     portrait = { "hit", "heal", "combat", "death", "low" }, text = { "numbers" }, font = { "numbers" } }
 Preview.FRAMES = { player = true, target = true }
 Preview.KINDS = { normal = true, elite = true, rare = true, rareelite = true, boss = true }
@@ -311,6 +311,7 @@ local function applySk(core, sk)
     -- wie am echten Rahmen: Schlieren und Ressourcen-Effekte nur beim Spieler
     Liquid.SetFx(sk.health, "preview-health", lq.fx, lq.debuffs and player or false)
     Liquid.SetFx(sk.power, "preview-power", lq.fx and player, false)
+    if ns.LiquidFizz then ns.LiquidFizz.SetPulse(sk.power, player and lq.regenPulse == true) end
     Liquid.SetTint(sk.health, player and Skin.TINTS.player or Skin.TINTS.hostile)
     Liquid.SetTint(sk.power, Skin.PowerTint({ id = "player" }))
     sk.holder:Show()
@@ -485,6 +486,11 @@ end
 function TEST.mana(core)
     local Fizz = ns.LiquidFizz
     return Fizz ~= nil and Fizz.TestTube(core.cur.power) or false
+end
+--- Regenerations-Impuls (Option liquid.regenPulse; aus => nichts)
+function TEST.regen(core)
+    local Fizz = ns.LiquidFizz
+    return Fizz ~= nil and Fizz.TestPulse(core.cur.power) or false
 end
 TEST.slosh = testSlosh
 TEST.shield = testShield

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2
+
+- Hidden Blizzard buff and debuff buttons under the target frame no longer catch the mouse, so tooltips match the icons you see.
+- With Blizzard's "Both" status text the percent and the number now sit cleanly at the left and right of the tube, clear of the portrait ring.
+- The settings preview now shows exactly the numbers and positions of your real frames, including Blizzard's rounding and short numbers.
+- New option "Show regeneration clearly" on the Liquid tab (off by default): a bright pulse marks the moment mana regeneration resumes after the five-second rule, with a test button in the preview.
+
 ## 1.1.1
 
 - Leftovers of Blizzard's power bar (full-resource pulse, gain/loss flash, cost preview, spark) no longer show on top of the power tube.

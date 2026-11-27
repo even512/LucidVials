@@ -88,14 +88,15 @@ end
 
 -- Fluessigkeit ------------------------------------------------------------------------------------------------------------
 -- Felder: "bool", "unit" (Zahl 0..1) oder "style" (Darstellung "edge" = Fluessigkeitskante, "piston" = Kolben-Kammer).
--- style/smooth/trail/fx/debuffs je Rahmen, slosh* global (Bewegungsphysik).
+-- style/smooth/trail/fx/debuffs je Rahmen, slosh* global (Bewegungsphysik), regenPulse global (nur die eigene Mana-Roehre:
+-- Impuls beim Einsetzen der Regeneration nach der 5-Sekunden-Regel, Standard aus).
 Schema.STYLES = { edge = true, piston = true }
 local LIQUID_KEYS = { smooth = "bool", trail = "bool", slosh = "bool", sloshStrength = "unit", sloshDamping = "unit",
-    style = "style", fx = "bool", debuffs = "bool" }
+    style = "style", fx = "bool", debuffs = "bool", regenPulse = "bool" }
 
 function Schema.LiquidDefaults()
     return { smooth = true, trail = true, slosh = true, sloshStrength = 0.6, sloshDamping = 0.4, style = "piston",
-        fx = true, debuffs = true }
+        fx = true, debuffs = true, regenPulse = false }
 end
 
 local function validLiquid(kind, v)
@@ -117,7 +118,7 @@ function Schema.ValidateLiquid(t)
 end
 
 Schema.RegisterArea("liquid", { defaults = Schema.LiquidDefaults, validate = Schema.ValidateLiquid,
-    global = { "slosh", "sloshStrength", "sloshDamping" } })
+    global = { "slosh", "sloshStrength", "sloshDamping", "regenPulse" } })
 
 -- Abschnitt ---------------------------------------------------------------------------------------------------------------
 function Schema.Defaults()

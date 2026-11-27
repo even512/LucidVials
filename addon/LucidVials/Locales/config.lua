@@ -52,6 +52,8 @@ add(en, {
     -- Fluessigkeit
     UI_LIQUID_HEAD_SLOSH = "Sloshing (the same for all frames)",
     UI_LIQUID_SLOSH_GLOBAL = "Sloshing is one physics for all frames. Choose “All frames” above to change it.",
+    UI_LIQUID_REGEN = "Show regeneration clearly",
+    UI_LIQUID_REGEN_TIP = "Your own mana tube only: when mana regeneration starts again after the five-second rule, a bright pulse flashes at the end of the liquid and the bubbling starts at full strength. Applies to all frames.",
 
     -- Profile
     UI_PROF_HEAD_ACTIVE = "Profile of this character",
@@ -117,6 +119,8 @@ add(de, {
 
     UI_LIQUID_HEAD_SLOSH = "Schwappen (für alle Rahmen gleich)",
     UI_LIQUID_SLOSH_GLOBAL = "Das Schwappen ist eine gemeinsame Physik für alle Rahmen. Wähle oben „Für alle Rahmen“, um es zu ändern.",
+    UI_LIQUID_REGEN = "Regeneration deutlich zeigen",
+    UI_LIQUID_REGEN_TIP = "Nur deine eigene Mana-Röhre: Setzt die Mana-Regeneration nach der Fünf-Sekunden-Regel wieder ein, blitzt am Ende der Flüssigkeit ein heller Impuls auf und das Sprudeln startet mit voller Stärke. Gilt für alle Rahmen.",
 
 
     UI_PROF_HEAD_ACTIVE = "Profil dieses Charakters",

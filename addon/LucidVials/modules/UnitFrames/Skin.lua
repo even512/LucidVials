@@ -818,6 +818,8 @@ local function apply(id)
     local fxOn = lq.fx and id ~= "tot"
     Liquid.SetFx(sk.health, id .. "-health", fxOn, lq.debuffs and id == "player" or false)
     Liquid.SetFx(sk.power, id .. "-power", fxOn and id == "player", false)
+    -- Regeneration deutlich zeigen (LiquidFizz): nur die eigene Mana-Roehre
+    if ns.LiquidFizz then ns.LiquidFizz.SetPulse(sk.power, id == "player" and lq.regenPulse == true) end
     hookFade(root)
     sk.holder:Show()
     Liquid.Show(sk.health)
@@ -1179,11 +1181,13 @@ function Skin.Debug()
         local tnow = GetTime and GetTime() or 0
         local lock = (fs.mana and fs.castAt) and math.max(0, ns.LiquidFizz.CFG.castLock - (tnow - fs.castAt)) or 0
         ns.Print("frames.fizz on=%s listening=%s mode=%s cur=%s max=%s regen=%s mana=%s token=%s grund=%s sperre5s=%.1f "
-            .. "tick=%s alpha=%.2f kurve=%s setalpha=%s bubbles=%d sparks=%d test=%s", yn(on), yn(ns.LiquidFizz.IsListening()),
+            .. "tick=%s alpha=%.2f kurve=%s setalpha=%s bubbles=%d sparks=%d test=%s impuls=%s/%d", yn(on),
+            yn(ns.LiquidFizz.IsListening()),
             tostring(fs.mode), fs.cur and tostring(fs.cur) or "-", fs.max and tostring(fs.max) or "-", yn(fs.regen),
             yn(fs.mana), tostring(fs.token or "-"), tostring(fs.reason), lock,
             fs.tickAt and string.format("%.1fs", tnow - fs.tickAt) or "-", a or 0, fs.innerSecret and "secret" or "1",
-            fs.alphaOk == nil and "-" or yn(fs.alphaOk), nb or 0, nsp or 0, yn((fs.testUntil or 0) > tnow))
+            fs.alphaOk == nil and "-" or yn(fs.alphaOk), nb or 0, nsp or 0, yn((fs.testUntil or 0) > tnow),
+            yn(sk and sk.power and sk.power.fx and sk.power.fx.fizz and sk.power.fx.fizz.pulseOn), fs.pulses or 0)
     end
     local pi = Physics and Physics.Info() or {}
     ns.Print("frames.slosh on=%s strength=%d damping=%d awake=%s tilt=%.2f wave=%.2f speed=%s turn=%s jumpHook=%s steps=%d",

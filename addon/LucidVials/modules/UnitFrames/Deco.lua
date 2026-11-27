@@ -21,6 +21,12 @@
 --   * Auren: eigener CustomAuraContainer (Blizzard rechnet secret intern), runde Fassungen in je einer Reihe Debuffs und
 --     Buffs unter den Roehren; fehlt die Vorlage, bleiben Blizzards Auren sichtbar. Groesse: unitframes.auraSize (Standard 22,
 --     14-36, /vials auren), wirkt sofort (vorhandene Knoepfe werden umdimensioniert).
+--     Blizzards Auren (TargetFrameContent.TargetFrameContentContextual.Auras) sind nur per SetAlpha(0) unsichtbar, ihre
+--     AuraButtons fangen aber weiter die Maus (Tooltips an leeren Stellen, ueber den eigenen Symbolen der Tooltip einer
+--     anderen Aura). Darum liegt ein
+--     eigener Maus-Schild (DisableUntrustedLayoutScriptsTemplate, sonst ist das Anheften an den sich selbst bemessenden
+--     Container verboten) deckungsgleich ueber Blizzards Container, und der eigene Container liegt eine Ebene darueber.
+--     Blizzards Container wird nicht angefasst (nur gelesen: Ebene; angeheftet wird nur der eigene Schild).
 -- /vials test ziel <art> zeigt die Zier ohne passendes Ziel (am Ziel bzw. an einem eigenen Testrahmen).
 -- Mini-Vorschau (Preview.lua, sk.preview): Ziel-Art je Instanz (sk.previewKind statt des modulglobalen S.test), ohne Auren,
 -- Raidmarker und Quest-Symbol, Stufe aus sk.previewLevel; echte Ziele und Questie bleiben unberuehrt.
@@ -67,6 +73,10 @@ Deco.GEM_TEST = { 1.0, 0.50, 0.25 }
 -- Auren: Symbolgroesse aus dem Profil (unitframes.auraSize, Skin.AURA_SIZE); gap/rowGap gelten bei refSize und wachsen
 -- proportional mit. Abstand unter der Roehre, Anteil der Innenflaeche fuers Symbol
 Deco.AURA = { refSize = 18, gap = 2, rowGap = 3, top = 3, iconFill = 1.04, perRowMax = 12 }
+-- Ebenen: Schild = Blizzards Container + shieldLift (ueber dessen Knoepfen), eigener Container = Schild + ownLift;
+-- ohne lesbare Ebene des Blizzard-Containers: Wurzel + levelFallback
+Deco.AURA_LEVEL = { shieldLift = 4, ownLift = 2, levelFallback = 12 }
+Deco.SHIELD_TEMPLATE = "DisableUntrustedLayoutScriptsTemplate"
 -- Ring mit Rohraufnahmen (uf-ring-aufnahme, 512 x 512; Lage in GEO.socket aus scripts/gen-unitframe-media.mjs
 -- socketGeometry: Ringmitte cx/cy und Texturbreite size x Ring-Durchmesser; je Roehre Fenster-Innenkanten top/bot, Haarlinien
 -- rimTop/rimBot, Manschette cuff, Fensterbeginn win, Sockelbeginn sock, Roehrenende endX - Anteile des halben Ring-
@@ -369,8 +379,10 @@ end
 Deco.InitAura = initAura
 
 --- Rueckfall: Knoepfe ohne SetIcon (Vorlage anders als erwartet) => eigener Container weg, Blizzards Auren sichtbar
+local showShield
 local function auraFallback(sk)
     if sk.auras then pcall(sk.auras.Hide, sk.auras) end
+    if showShield then showShield(sk, false) end
     sk.auras, sk.auraState = nil, "noicon"
     local r = sk.found and sk.found.Auras
     if r and sk.hidden and sk.hidden[r] then Skin.ShowRegion(sk, r) end
@@ -382,6 +394,53 @@ local function auraLayout(index, newLine)
         forceNewLine = newLine, layoutIndex = index }
 end
 
+--- Ebenen fuer Schild und eigenen Container: ueber Blizzards (unsichtbaren) Aura-Knoepfen
+local function auraLevels(sk)
+    local LV = Deco.AURA_LEVEL
+    local blizz = sk.found and sk.found.Auras
+    local bl = blizz and num(blizz, "GetFrameLevel")
+    if not bl then bl = (num(sk.root, "GetFrameLevel") or num(sk.holder, "GetFrameLevel") or 1) + LV.levelFallback end
+    local shieldL = bl + LV.shieldLift
+    return shieldL, shieldL + LV.ownLift
+end
+
+--- Maus-Schild ueber Blizzards Auren: deckungsgleich mit deren Container, faengt Maus und Klicks ab (kein Tooltip einer
+--- unsichtbaren Aura); ohne Vorlage oder wenn das Anheften scheitert: kein Schild (Zustand in /vials debug)
+local function buildShield(sk, level)
+    sk.auraShieldState = "missing"
+    local ok, f = pcall(CreateFrame, "Frame", nil, sk.holder, Deco.SHIELD_TEMPLATE)
+    if not ok or type(f) ~= "table" then return end
+    pcall(f.Hide, f)
+    call(f, "SetFrameLevel", level)
+    call(f, "EnableMouse", true)
+    sk.auraShield, sk.auraShieldState = f, "off"
+end
+
+--- Schild an Blizzards Container heften und zeigen (nur wenn Blizzards Auren gerade verborgen sind)
+function showShield(sk, on)
+    local f = sk.auraShield
+    if not f then return end
+    local blizz = sk.found and sk.found.Auras
+    if not (on and blizz) then
+        pcall(f.Hide, f)
+        sk.auraShieldState = "off"
+        return
+    end
+    if sk.auraShieldOn ~= blizz then
+        call(f, "ClearAllPoints")
+        if not call(f, "SetAllPoints", blizz) then
+            pcall(f.Hide, f)
+            sk.auraShieldState = "noanchor"
+            return
+        end
+        sk.auraShieldOn = blizz
+    end
+    call(f, "SetFrameLevel", (auraLevels(sk)))
+    pcall(f.Show, f)
+    sk.auraShieldState = "on"
+end
+Deco.ShowShield = showShield
+
 --- eigener Aura-Container (Fallback: ohne Vorlage bleibt alles bei Blizzard)
 local function buildAuras(sk)
     sk.auraState = "missing"
@@ -390,6 +449,9 @@ local function buildAuras(sk)
         if ok and type(c) == "table" then pcall(c.Hide, c) end
         return
     end
+    -- Ebene vor dem Anlegen der Gruppen setzen: die Knoepfe entstehen mit AddAuraGroup als Kinder (Ebene + 1)
+    local shieldL, ownL = auraLevels(sk)
+    call(c, "SetFrameLevel", ownL)
     local sortM, sortD = _G.AuraContainerSortMethod, _G.AuraContainerSortDirection
     local dOpts = { initializeFrame = initAura, maxFrameCount = Deco.AURA.perRowMax, layout = auraLayout(1, false) }
     if type(sortM) == "table" and type(sortD) == "table" and sortM.UnitFrameDebuff and sortD.Normal then
@@ -405,6 +467,7 @@ local function buildAuras(sk)
         return
     end
     sk.auras, sk.auraState, sk.auraHostile, sk.auraSize = c, "ok", true, (auraMetrics())
+    buildShield(sk, shieldL)
     if S.auraInitFail then auraFallback(sk) end
 end
 
@@ -805,6 +868,7 @@ end
 function Deco.HideBlizzard(sk)
     if S.auraInitFail and sk.auras then auraFallback(sk) end -- spaet erzeugte Knoepfe ohne SetIcon
     if sk.auras and sk.found then Skin.HideRegion(sk, sk.found.Auras) end
+    if sk.auras then showShield(sk, sk.found and sk.found.Auras ~= nil) end
 end
 
 function Deco.Remove(sk)
@@ -813,6 +877,7 @@ function Deco.Remove(sk)
         if sk[key] then Liquid.SetOpenEnd(sk[key], nil) end
     end
     if sk.socket then showSocket(sk, false) end
+    showShield(sk, false)
 end
 
 -- Ereignisse --------------------------------------------------------------------------------------------------------------
@@ -940,10 +1005,12 @@ function Deco.Debug()
     if sk and sk.zBack then
         local blizz = sk.found and sk.found.Auras
         ns.Print("frames.ziel klasse=%s zier=%s totenkopf=%s stein=%s quest=%s art=%s status=%s marker=%s auren=%s je_reihe=%s "
-            .. "blizzAuren=%s questieVerborgen=%d questieHook=%s test=%s", tostring(sk.zRaw or "-"), tostring(sk.zKind or "-"),
+            .. "blizzAuren=%s schild=%s questieVerborgen=%d questieHook=%s test=%s", tostring(sk.zRaw or "-"),
+            tostring(sk.zKind or "-"),
             yn(sk.skull and sk.skull:IsShown()), tostring(sk.gemColor or "-"), yn(sk.questWant), tostring(sk.questKind or "!"),
             tostring(sk.questStatus or "-"), tostring(sk.markerState or "-"), tostring(sk.auraState or "-"),
-            tostring(sk.auraPerRow or "-"), blizz and (sk.auras and "verborgen" or "sichtbar") or "fehlt", S.questieHiddenN,
+            tostring(sk.auraPerRow or "-"), blizz and (sk.auras and "verborgen" or "sichtbar") or "fehlt",
+            tostring(sk.auraShieldState or "-"), S.questieHiddenN,
             S.questieNpHooked == nil and "-" or (S.questieNpHooked and "ja" or "nein"), tostring(S.test or "-"))
     else
         ns.Print("frames.ziel aufgebaut=%s test=%s", L.NP_NO, tostring(S.test or "-"))

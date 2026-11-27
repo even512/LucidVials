@@ -29,6 +29,12 @@
 -- keine-regeneration | test.
 -- TYPES: Mana, Fokus, Energie regenerieren von selbst; Wut, Runenmacht, Astralmacht, Wahnsinn, Zorn, Pein usw. nicht.
 -- /vials test mana: CFG.testSecs s Sprudeln und Funkenspruehen, auch bei voller Ressource.
+-- Regeneration deutlich zeigen (Option liquid.regenPulse, Standard aus; Hotfix 1.1.2): setzt die Mana-Regeneration nach der
+--   5-Sekunden-Regel wieder ein, gibt es einmal einen Lichtimpuls am Fuellungsende (Halo + Kern, uf-fx-burst), einen
+--   Funkenstoss, sofort volles Sprudeln und eine kraeftigere Welle. Erkannt ueber dieselbe Entscheidung wie das Sprudeln
+--   (decide): nach einem eigenen Zauber (state.lockSeen) und Mana wechselt der Grund auf aktiv bzw. aktiv(tick). Lesbar:
+--   Anstieg verglichen; secret (Kampf, Forever auch draussen): nur der Ereignis-Takt - kein Secret wird verglichen.
+--   Mini-Vorschau: Fizz.TestPulse (eigene Roehre, nur mit eingeschalteter Option).
 local ADDON_NAME, ns = ...
 local Compat = ns.Compat
 
@@ -44,6 +50,9 @@ Fizz.TEX = {
 }
 Fizz.TYPES = { [0] = true, [2] = true, [3] = true }           -- Enum.PowerType: Mana, Focus, Energy
 Fizz.TOKENS = { MANA = true, FOCUS = true, ENERGY = true }
+Fizz.PULSE_TEX = MEDIA .. "uf-fx-burst"
+-- Impuls: Dauer (s), Halo-Groesse (x Hoehe, von..bis), Kern-Groesse (x Hoehe), Deckkraft, Funken im Stoss, Wellen-Staerke
+Fizz.PULSE = { secs = 0.9, haloFrom = 1.6, haloTo = 4.2, core = 1.4, alpha = 1.0, coreA = 0.9, sparks = 8, kick = 0.45 }
 -- hold: an nach dem letzten Anstieg (s); fadeIn/fadeOut (1/s); bright: Aufhellung der Ressourcenfarbe;
 -- Blasen: Pool, Abstand (s), Groesse px (min..max), Steigzeit (s), Wackeln (px, Hz), Platzdauer (s), Alpha;
 -- Funken: Pool, Abstand (s), Groesse px, Anfangs-Fall (x Hoehe/s), Schwerkraft (x Hoehe/s^2), seitlich (x Hoehe/s), Leben (s);
@@ -62,6 +71,7 @@ local state = { mode = "none", prev = nil, last = nil, regen = false, testUntil 
 local notFullCurve
 local listening, evFrame = false, nil
 local update -- unten (Ereignis-Auswertung)
+local stepPulse -- unten (Bild des Regenerations-Impulses)
 
 local function now() return type(GetTime) == "function" and GetTime() or 0 end
 
@@ -110,6 +120,12 @@ function Fizz.Attach(lb)
         f:SetAlpha(0)
         f:Hide()
     end
+    -- Impuls (Regeneration deutlich zeigen): eigener, nicht geclippter Frame ueber dem Glas, eigene Deckkraft
+    local pf = CreateFrame("Frame", nil, lb.root)
+    fz.pFrame = pf
+    fz.pHalo = sprite(pf, "OVERLAY", 5, Fizz.PULSE_TEX)
+    fz.pCore = sprite(pf, "OVERLAY", 6, Fizz.PULSE_TEX)
+    pf:Hide()
     fx.fizz = fz
     tubes[lb] = true
 end
@@ -119,6 +135,19 @@ local function hideAll(fz)
     for i = 1, #fz.s do fz.sOn[i] = false; fz.s[i]:Hide() end
     fz.outer:Hide()
     fz.sOuter:Hide()
+    fz.pulseAt = nil
+    fz.pFrame:Hide()
+end
+
+--- Option "Regeneration deutlich zeigen" je Roehre (Skin.lua/Preview.lua: nur die Ressourcenroehre des Spielers)
+function Fizz.SetPulse(lb, on)
+    local fz = lb and lb.fx and lb.fx.fizz
+    if not fz then return end
+    fz.pulseOn = on == true
+    if not fz.pulseOn then
+        fz.pulseAt = nil
+        fz.pFrame:Hide()
+    end
 end
 
 --- an/aus (Rolle "player-power" bzw. "preview-power" und Effekte an). own = Roehre der Mini-Vorschau (Preview.lua): sprudelt
@@ -143,12 +172,13 @@ function Fizz.SetLevel(lb, level)
     fz.inner:SetFrameLevel(level)
     fz.sOuter:SetFrameLevel(level + 3) -- ueber Glas und Rahmen (lb.top = Grund + 3)
     fz.sInner:SetFrameLevel(level + 3)
+    if fz.pFrame then fz.pFrame:SetFrameLevel(level + 3) end
 end
 
 function Fizz.Layout(lb)
     local fz = lb.fx.fizz
     local root = lb.root
-    for _, f in ipairs({ fz.outer, fz.inner, fz.sOuter, fz.sInner }) do
+    for _, f in ipairs({ fz.outer, fz.inner, fz.sOuter, fz.sInner, fz.pFrame }) do
         f:ClearAllPoints()
         f:SetAllPoints(root)
     end
@@ -250,6 +280,7 @@ local function onEvent(_, event, unit, token)
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         state.castAt = now() -- 5-Sekunden-Regel (nur der Zeitpunkt)
         state.last = nil
+        state.lockSeen = true -- Impuls, sobald danach die Regeneration einsetzt
         return
     end
     if event == "UNIT_POWER_FREQUENT" or event == "UNIT_POWER_UPDATE" then
@@ -326,6 +357,20 @@ function Fizz.TestTube(lb)
     local fz = lb and lb.fx and lb.fx.fizz
     if not (fz and fz.on and fz.own) then return false end
     fz.testUntil = now() + Fizz.CFG.testSecs
+    pcall(fz.inner.SetAlpha, fz.inner, 1)
+    pcall(fz.sInner.SetAlpha, fz.sInner, 1)
+    lb.fx.busy = true
+    if ns.Liquid.Wake then ns.Liquid.Wake() end
+    return true
+end
+
+--- Mini-Vorschau: Regenerations-Impuls an der eigenen Roehre (nur mit Effekten und eingeschalteter Option). Liefert true,
+--- wenn er laeuft.
+function Fizz.TestPulse(lb)
+    local fz = lb and lb.fx and lb.fx.fizz
+    if not (fz and fz.on and fz.own and fz.pulseOn) then return false end
+    fz.testUntil = now() + Fizz.CFG.testSecs
+    fz.pulseAt = -1 -- im naechsten Bild starten (Zeit aus dem Treiber)
     pcall(fz.inner.SetAlpha, fz.inner, 1)
     pcall(fz.sInner.SetAlpha, fz.sInner, 1)
     lb.fx.busy = true
@@ -448,6 +493,39 @@ local function stepSparks(lb, fz, t, dt, spawn, h, top, len)
     return any
 end
 
+--- Impuls am Fuellungsende (Anker wie der Kolben): Halo waechst und verblasst, heller Kern; liefert true, solange er laeuft
+function stepPulse(lb, fz, t)
+    local at = fz.pulseAt
+    if not at or at < 0 then return at ~= nil end
+    local P = Fizz.PULSE
+    local u = (t - at) / P.secs
+    if u >= 1 then
+        fz.pulseAt = nil
+        fz.pFrame:Hide()
+        return false
+    end
+    local h = lb.h or 10
+    local c, k = lb.tint or WHITE, Fizz.CFG.bright
+    local r, g, b = c[1] + (1 - c[1]) * k, c[2] + (1 - c[2]) * k, c[3] + (1 - c[3]) * k
+    local anchor = lb.barTex or lb.root
+    local hs = h * (P.haloFrom + (P.haloTo - P.haloFrom) * u)
+    fz.pHalo:ClearAllPoints()
+    fz.pHalo:SetPoint("CENTER", anchor, "RIGHT", 0, 0)
+    fz.pHalo:SetSize(hs, hs)
+    fz.pHalo:SetVertexColor(r, g, b)
+    fz.pHalo:SetAlpha(P.alpha * (1 - u) ^ 1.5)
+    local cs = h * P.core * (1 - 0.4 * u)
+    fz.pCore:ClearAllPoints()
+    fz.pCore:SetPoint("CENTER", anchor, "RIGHT", 0, 0)
+    fz.pCore:SetSize(cs, cs)
+    fz.pCore:SetVertexColor(1, 1, 1)
+    fz.pCore:SetAlpha(P.coreA * (1 - u) ^ 2)
+    fz.pHalo:Show()
+    fz.pCore:Show()
+    fz.pFrame:Show()
+    return true
+end
+
 --- Ein Bild (aus LiquidFx.Step); liefert true, solange es sprudelt, ausblendet oder Sprites leben
 function Fizz.Step(lb, t, dt)
     local fz = lb.fx.fizz
@@ -461,7 +539,30 @@ function Fizz.Step(lb, t, dt)
         local reason
         want, sure, reason = decide(t)
         state.reason = reason
+        -- Einsetzen der Regeneration nach der 5-Sekunden-Regel: einmal Impuls (nur Mana, nur mit Option)
+        if reason == "voll" or reason == "keine-regeneration" then
+            state.lockSeen = false
+        elseif want and state.lockSeen and state.mana and (reason == "aktiv" or reason == "aktiv(tick)") then
+            state.lockSeen = false
+            if fz.pulseOn then
+                fz.pulseAt = -1
+                state.pulses = (state.pulses or 0) + 1
+            end
+        end
     end
+    if fz.pulseAt == -1 then -- Impuls beginnt: sofort volles Sprudeln, Funkenstoss, kraeftigere Welle
+        fz.pulseAt = t
+        fz.a = 1
+        local h = lb.h or 10
+        local P = ns.Liquid.PISTON
+        for _ = 1, Fizz.PULSE.sparks do
+            spawnSpark(fz, -P.piston * h * (0.1 + 0.8 * math.random()), -h * (0.1 + 0.5 * math.random()), h)
+        end
+        if lb.style == "piston" and lb.field and ns.LiquidWave and ns.LiquidWave.Kick then
+            ns.LiquidWave.Kick(lb.field, "land", Fizz.PULSE.kick, fz.sign)
+        end
+    end
+    local pulsing = stepPulse(lb, fz, t)
     local a = fz.a
     if want then a = math.min(1, a + dt * C.fadeIn) else a = math.max(0, a - dt * C.fadeOut) end
     fz.a = a
@@ -492,7 +593,7 @@ function Fizz.Step(lb, t, dt)
             fz.outer:Hide()
             fz.sOuter:Hide()
         end
-        return want
+        return want or pulsing
     end
     -- sanft unruhige Oberflaeche (Kolben-Kammer), nur wenn sicher regeneriert wird
     if sure and lb.style == "piston" and lb.field and t - fz.kickT > C.kickEvery then

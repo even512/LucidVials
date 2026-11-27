@@ -34,7 +34,7 @@ end
 Config.RegisterPage("liquid", {
     label = "UI_TAB_LIQUID",
     order = 20,
-    height = 330,
+    height = 356,
     build = function(page)
         page.scope = W.FrameScope(page, "liquid", function() Config.Refresh() end)
 
@@ -56,22 +56,27 @@ Config.RegisterPage("liquid", {
             function(v) setLiquid(page, "fx", v) end)
         page.debuffs = W.CheckAt(page, L.UI_FRAMES_DEBUFFS, L.UI_FRAMES_DEBUFFS_TIP, 570, -122,
             function(v) setLiquid(page, "debuffs", v) end)
+        -- Regeneration deutlich zeigen: eine Einstellung fuer alle (wirkt nur an der eigenen Mana-Roehre)
+        page.regenPulse = W.CheckAt(page, L.UI_LIQUID_REGEN, L.UI_LIQUID_REGEN_TIP, 394, -148,
+            function(v) setGlobal(page, "regenPulse", v) end)
 
         local h2 = W.Header(page, L.UI_LIQUID_HEAD_SLOSH, 740)
-        h2:SetPoint("TOPLEFT", 0, -162)
-        page.sloshNote = W.Note(page, 4, -186, 736, "GameFontNormalSmall", C.warn)
-        page.slosh = W.CheckAt(page, L.UI_FRAMES_SLOSH, L.UI_FRAMES_SLOSH_TIP, 0, -212,
+        h2:SetPoint("TOPLEFT", 0, -188)
+        page.sloshNote = W.Note(page, 4, -212, 736, "GameFontNormalSmall", C.warn)
+        page.slosh = W.CheckAt(page, L.UI_FRAMES_SLOSH, L.UI_FRAMES_SLOSH_TIP, 0, -238,
             function(v) setGlobal(page, "slosh", v) end)
-        page.strength = W.SliderAt(page, L.UI_FRAMES_STRENGTH, L.UI_FRAMES_STRENGTH_TIP, 4, -242, 0, 100, 5, pctFmt,
+        page.strength = W.SliderAt(page, L.UI_FRAMES_STRENGTH, L.UI_FRAMES_STRENGTH_TIP, 4, -268, 0, 100, 5, pctFmt,
             function(v) setGlobal(page, "sloshStrength", v / 100) end)
-        page.damping = W.SliderAt(page, L.UI_FRAMES_DAMPING, L.UI_FRAMES_DAMPING_TIP, 394, -242, 0, 100, 5, pctFmt,
+        page.damping = W.SliderAt(page, L.UI_FRAMES_DAMPING, L.UI_FRAMES_DAMPING_TIP, 394, -268, 0, 100, 5, pctFmt,
             function(v) setGlobal(page, "sloshDamping", v / 100) end)
 
-        page.status = W.Note(page, 4, -300, 736, "GameFontNormalSmall", C.muted)
+        page.status = W.Note(page, 4, -326, 736, "GameFontNormalSmall", C.muted)
 
         -- Standardwerte aus den Schema-Defaults (je Rahmen starten Eigenwerte mit denselben Werten; Schwappen gilt global)
         page.style:SetDefault("liquid.style")
-        for _, key in ipairs({ "smooth", "trail", "fx", "debuffs", "slosh" }) do page[key]:SetDefault("liquid." .. key) end
+        for _, key in ipairs({ "smooth", "trail", "fx", "debuffs", "slosh", "regenPulse" }) do
+            page[key]:SetDefault("liquid." .. key)
+        end
         page.strength:SetDefault("liquid.sloshStrength", pct100)
         page.damping:SetDefault("liquid.sloshDamping", pct100)
     end,
@@ -92,6 +97,7 @@ Config.RegisterPage("liquid", {
         -- Schwappen: immer der globale Wert; nur bei "fuer alle" bedienbar
         local g = Skin.GetConfig().liquid
         local all = frame == nil
+        page.regenPulse:SetValue(g.regenPulse)
         page.slosh:SetValue(g.slosh)
         page.strength:SetValue(pct100(g.sloshStrength))
         page.damping:SetValue(pct100(g.sloshDamping))

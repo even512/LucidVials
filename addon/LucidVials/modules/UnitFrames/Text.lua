@@ -22,6 +22,14 @@
 -- Blizzard-Text, der stehen bleiben koennte) und spiegelt Blizzards Statustext-Einstellung (Text.BlizzardMode): NONE = nur bei
 -- Maus ueber der Buehne (Text.SetHover), NUMERIC = aktuell / max, PERCENT = Prozent, BOTH = Prozent links, Zahl rechts (wie
 -- Blizzards LeftText/RightText), Blizzards Farbe. XP-Roehre der Vorschau: st.preview, Werte nur ueber Text.UpdateXP.
+-- Blizzard-Muster wie TextStatusBar.lua (Forever 1.60.1 und Retail 12.1.5 gleich): Zahlen ueber AbbreviateLargeNumbers (Spieler-
+-- und Zielrahmen setzen capNumericDisplay), Prozent aufgerundet (math.ceil) mit "%" ohne Leerzeichen, BOTH = Prozent links
+-- (nur Leben/Mana), aktuelle Zahl rechts; Ziel: Wert 0 zeigt nichts (zeroText ""). Rundung secret-sicher ueber eine eigene
+-- Kurve (0..1 -> 0,5..100,5 knapp darunter, %.0f rundet dann wie ceil).
+-- "Wie Blizzard" an Blizzards Stelle mit BOTH: Blizzards LeftText/RightText liegen an den Enden seines Balkens, also unter dem
+-- Portraetring bzw. auf den Roehrenenden; sie werden per SetAlpha(0) verdeckt und eigene Kopien (Blizzards Schrift und Farbe)
+-- stehen links und rechts im freien Teil der Roehre - am echten Rahmen und in der Vorschau gleich. Freier Teil (Text.Span):
+-- Kappen-Rundung am geschlossenen Ende, am offenen Ende bis zur Aussenkante des Rings bzw. der Manschette der Rohraufnahme.
 local _, ns = ...
 local Compat, L = ns.Compat, ns.L
 local Style = ns.Style
@@ -48,13 +56,21 @@ Text.BARS = { "health", "power" }
 Text.BLIZZ_KEYS = { bar = { "TextString", "HealthBarText", "ManaBarText", "LeftText", "RightText" },
     parent = { "HealthBarText", "LeftText", "RightText" } }
 Text.SIZE = { rel = 0.62, min = 7, max = 14, xp = 0.8, inset = 4 } -- Schriftgroesse x Roehrenhoehe, Rand in px
+-- Freier Teil der Roehre: cap = Anteil der Glas-Kappe (Liquid.GLASS) am geschlossenen Ende, gap = Mindestabstand zwischen
+-- Prozent und Zahl (BOTH), ringOuter/cuff = Aussenkante des Rings bzw. der Manschette (Anteil des halben Ring-Durchmessers),
+-- max = groesster Einzug je Seite (Anteil der Roehrenbreite; unplausible Rechtecke)
+Text.SPAN = { cap = 0.6, gap = 6, ringOuter = 0.9844, cuff = 1.2, max = 0.35 }
+-- Blizzard-Muster: Prozent wie TextStatusBar.lua ("%" ohne Leerzeichen in jeder Sprache), Kurve fuer das Aufrunden
+Text.BLIZZ_PCT = "%.0f%%"
+Text.CEIL_BIAS = 0.4999
 Text.BOB = { wave = 0.45, tilt = 0.25, max = 0.2, step = 0.5 }      -- Wippen: x Roehrenhoehe, Schwelle in px
 -- "Schwimmt auf dem Pegel": zwei Kopien, links der Kante (in der Fluessigkeit) und rechts davon (im leeren Glas). Welche zu sehen
 -- ist, entscheidet eine Alpha-Kurve ueber den Fuellanteil (UnitHealthPercent/UnitPowerPercent mit Kurve, secret-sicher, nur an
 -- SetAlpha): unter der Schwelle (Textbreite + Rand passt nicht mehr links der Kante) wechselt der Wert weich (fade = Breite der
 -- Ueberblendung im Anteil) auf die andere Seite. Textbreite aus GetStringWidth, wenn lesbar, sonst geschaetzt (chars x Groesse).
 Text.FLOAT = { margin = 4, fade = 0.03, min = 0.02, max = 0.98, charW = 0.55,
-    chars = { short = 6, full = 9, percent = 5, numPercent = 12, both = 14, curmaxShort = 13, curmaxFull = 19, deficit = 9 } }
+    chars = { short = 6, full = 9, percent = 5, numPercent = 12, both = 14, curmaxShort = 13, curmaxFull = 19, deficit = 9,
+        blizzNumeric = 15, blizzPercent = 4, blizzBoth = 12, blizzValue = 7 } }
 -- "Ins Glas graviert": mattierte Aetzung im Glas ueber der Fluessigkeit - Grundschrift hell-kuehl mit niedriger Deckkraft (die
 -- Fluessigkeit scheint durch), eingelassene Kante aus Lichtkante (helle Kopie lightPx Pixel tiefer) und Schattenkante (dunkle Kopie
 -- darkPx Pixel hoeher), Grundschrift obenauf; keine Kontur, kein Schatten (ueberstimmt die Schrift-Einstellungen). Offsets in
@@ -241,6 +257,25 @@ function Text.ScaleCurve()
     return scaleCurve or nil
 end
 
+--- Prozent wie Blizzard aufgerundet: 0..1 -> CEIL_BIAS..100 + CEIL_BIAS (mit %.0f gerundet = math.ceil, secret-sicher)
+local ceilCurve
+function Text.CeilCurve()
+    if ceilCurve ~= nil then return ceilCurve or nil end
+    ceilCurve = false
+    local C = _G.C_CurveUtil
+    if not (C and type(C.CreateCurve) == "function") then return Text.ScaleCurve() end
+    local ok, c = pcall(C.CreateCurve)
+    if not ok or c == nil then return Text.ScaleCurve() end
+    local b = Text.CEIL_BIAS
+    local linear = type(Enum) == "table" and type(Enum.LuaCurveType) == "table" and Enum.LuaCurveType.Linear or 0
+    pcall(c.SetType, c, linear)
+    if pcall(c.AddPoint, c, 0, 0) and pcall(c.AddPoint, c, 0.0001, b) and pcall(c.AddPoint, c, 1, 100 + b) then
+        ceilCurve = c
+        return c
+    end
+    return Text.ScaleCurve()
+end
+
 function Text.ColorCurve()
     if colorCurve ~= nil then return colorCurve or nil end
     colorCurve = false
@@ -271,15 +306,23 @@ function Text.BlizzardMode()
 end
 
 --- Blizzard-Muster: Format aus Blizzards Statustext-Einstellung (Text.BlizzardMode). Beides = Prozent + Zahl (Ressource nur bei
---- Mana, sonst wie Blizzard nur die aktuelle Zahl); Zahl, Keiner und Unbekanntes = aktuell / max.
+--- Mana, sonst wie Blizzard nur die aktuelle Zahl); Zahl, Keiner und Unbekanntes = aktuell / max. Zahlen und Prozent wie
+--- Blizzards TextStatusBar (AbbreviateLargeNumbers, aufgerundet, "%" ohne Leerzeichen).
 function Text.PatternFormat(kind, pt)
     local v = Text.BlizzardMode()
-    if v == "PERCENT" then return "percent" end
+    if v == "PERCENT" then return "blizzPercent" end
     if v == "BOTH" then
-        if kind == "health" or pt == 0 then return "both" end
-        return "full"
+        if kind == "health" or pt == 0 then return "blizzBoth" end
+        return "blizzValue"
     end
-    return "curmaxFull"
+    return "blizzNumeric"
+end
+
+--- Blizzards Zahlenkuerzung (capNumericDisplay); fehlt sie im Client: volle Zahl
+local function abbrevLarge(n)
+    local fn = _G.AbbreviateLargeNumbers
+    if type(fn) == "function" then return fn(n) end
+    return BreakUpLargeNumbers(n)
 end
 
 -- Die Kette: liefert Formatmuster, Anzahl der Argumente und die (ggf. secret) Argumente. Nur Durchreichen an Format-APIs.
@@ -299,6 +342,14 @@ local function compose(api, unit, kind, fmt, pt)
         return "%s / %s", 2, AbbreviateNumbers(api.cur(unit, kind, pt)), AbbreviateNumbers(api.max(unit, kind, pt))
     elseif fmt == "curmaxFull" then
         return "%s / %s", 2, BreakUpLargeNumbers(api.cur(unit, kind, pt)), BreakUpLargeNumbers(api.max(unit, kind, pt))
+    elseif fmt == "blizzNumeric" then
+        return "%s / %s", 2, abbrevLarge(api.cur(unit, kind, pt)), abbrevLarge(api.max(unit, kind, pt))
+    elseif fmt == "blizzPercent" then
+        return Text.BLIZZ_PCT, 1, api.pct(unit, kind, pt, Text.CeilCurve())
+    elseif fmt == "blizzValue" then
+        return "%s", 1, abbrevLarge(api.cur(unit, kind, pt))
+    elseif fmt == "blizzBoth" then
+        return Text.BLIZZ_PCT .. "  %s", 2, api.pct(unit, kind, pt, Text.CeilCurve()), abbrevLarge(api.cur(unit, kind, pt))
     elseif fmt == "deficit" then
         local S = C_StringUtil
         return "%s", 1, S.WrapString(S.TruncateWhenZero(api.miss(unit, kind, pt)), "-")
@@ -343,44 +394,65 @@ local function renderValue(e, unit)
     return ok
 end
 
---- Vorschau, "Wie Blizzard": Blizzards Anordnung - BOTH = Prozent links (LeftText), Zahl rechts (RightText), sonst mittig
+--- lesbare aktuelle Zahl 0 (Blizzards Zielrahmen: zeroText "" => nichts); secret oder unlesbar => false
+local function readableZero(api, src, kind, pt)
+    local ok, v = pcall(api.cur, src, kind, pt)
+    return ok and Compat.Num(v) == 0
+end
+
+--- "Wie Blizzard" (Vorschau und mittig/BOTH am echten Rahmen): Blizzards Muster. Geteilt (BOTH an Blizzards Stelle) =
+--- Prozent links, Zahl rechts im freien Teil der Roehre (Text.Span); sonst mittig (Vorschau: an der Ersatz-Leiste, wie
+--- Blizzards TextString, sonst im freien Teil der Roehre)
 local function renderMirror(e, unit)
     local api, src = source(e, unit)
     local pt = e.kind == "power" and powerType(e.values and "player" or unit) or nil
     local fmt = Text.PatternFormat(e.kind, pt)
-    if noMax(api, src, e.kind, pt) then
+    if noMax(api, src, e.kind, pt) or (e.zeroBlank and readableZero(api, src, e.kind, pt)) then
         clearAll(e)
         e.hi:SetText("")
         return true
     end
-    local split = e.split and fmt == "both" -- Blizzards Lage: Prozent links, Zahl rechts; mittig: beides zusammen
-    -- Vorschau in Blizzards Lage: Anker an der Ersatz-Leiste (wie Blizzards TextString), sonst die Roehre
+    local split = e.split and (fmt == "blizzBoth" or fmt == "blizzValue")
     local A = e.anchor
-    local root, I, dy = A and A.region or e.lb.root, Text.SIZE.inset, A and A.dy or 0
-    local okW, rw = pcall(root.GetWidth, root)
-    rw = okW and Compat.Num(rw) or nil
-    local w = math.max(1, (rw or e.lb.w or 100) - 2 * I)
     e.main:ClearAllPoints()
     e.hi:ClearAllPoints()
+    local leftFmt
     if split then
+        local root, l, r, w = e.lb.root, Text.Span(e)
+        local half = math.max(1, (w - Text.SPAN.gap) / 2)
         e.main:SetJustifyH("LEFT")
-        e.main:SetPoint("LEFT", root, "LEFT", I, dy)
+        e.main:SetPoint("LEFT", root, "LEFT", l, 0)
         e.hi:SetJustifyH("RIGHT")
-        e.hi:SetPoint("RIGHT", root, "RIGHT", -I, dy)
-        e.main:SetWidth(w / 2)
-        e.hi:SetWidth(w / 2)
-    else
+        e.hi:SetPoint("RIGHT", root, "RIGHT", -r, 0)
+        e.main:SetWidth(half)
+        e.hi:SetWidth(half)
+        leftFmt = fmt == "blizzBoth" and "blizzPercent" or nil -- Ressource ausser Mana: nur die Zahl rechts (wie Blizzard)
+    elseif A then
+        local root, I = A.region, Text.SIZE.inset
+        local okW, rw = pcall(root.GetWidth, root)
+        rw = okW and Compat.Num(rw) or nil
         e.main:SetJustifyH("CENTER")
-        e.main:SetPoint("CENTER", root, "CENTER", 0, dy)
+        e.main:SetPoint("CENTER", root, "CENTER", 0, A.dy or 0)
+        e.main:SetWidth(math.max(1, (rw or e.lb.w or 100) - 2 * I))
+        e.hi:SetText("")
+    else
+        local root, l, r, w = e.lb.root, Text.Span(e)
+        e.main:SetJustifyH("CENTER")
+        e.main:SetPoint("CENTER", root, "CENTER", (l - r) / 2, 0)
         e.main:SetWidth(w)
         e.hi:SetText("")
     end
     e.hi:SetShown(split)
-    local ok, pat, n, a, b = pcall(compose, api, src, e.kind, split and "percent" or fmt, pt)
-    if ok then ok = pcall(setAll, e, pat, n, a, b) end
+    local ok = true
+    if split and not leftFmt then
+        clearAll(e)
+    else
+        local okC, pat, n, a, b = pcall(compose, api, src, e.kind, split and leftFmt or fmt, pt)
+        ok = okC and pcall(setAll, e, pat, n, a, b)
+    end
     if ok and split then
-        local ok2, pat2, n2, a2 = pcall(compose, api, src, e.kind, "full", pt)
-        ok = ok2 and pcall(e.hi.SetFormattedText, e.hi, pat2, a2) and n2 == 1
+        local ok2, pat2, n2, a2 = pcall(compose, api, src, e.kind, "blizzValue", pt)
+        ok = ok2 and n2 == 1 and pcall(e.hi.SetFormattedText, e.hi, pat2, a2)
         local c = Text.COLORS.white
         e.hi:SetTextColor(c[1], c[2], c[3], 1)
         e.hi:SetAlpha(1)
@@ -582,6 +654,44 @@ local function floatSides(e, unit)
     e.alt:SetAlpha(0)
 end
 
+--- Bildschirm-Lage (eigene Frames/Texturen, lesbar) oder nil
+local function edgeX(obj, method)
+    local ok, v = call(obj, method)
+    return ok and Compat.Num(v) or nil
+end
+
+--- Freier Teil der Roehre fuer Zahlen: Einzug links/rechts (UI ab den Kanten von lb.root) und freie Breite. Geschlossenes
+--- Ende: Rand + Anteil der Glas-Kappe; offenes Ende (lb.openEnd, ringseitig): bis zur Aussenkante des Rings bzw. der
+--- Manschette der Rohraufnahme (sk.socketOn), aus den Rechtecken von Roehre und Ring. Unlesbar => Rand + Kappe.
+function Text.Span(e)
+    local lb, P, I = e.lb, Text.SPAN, Text.SIZE.inset
+    local w, h = lb.w or 100, lb.h or 10
+    local G = ns.Liquid and ns.Liquid.GLASS
+    local cap = G and (G.cap * G.aspect * h * P.cap) or 0
+    local l, r = I + cap, I + cap
+    local sk = e.sk
+    local side = lb.openEnd
+    if sk and sk.ring and (side == "left" or side == "right") then
+        local cx = edgeX(sk.ring, "GetCenter")
+        local half = (sk.ringSize or 0) / 2
+        local edge = (sk.socketOn and P.cuff or P.ringOuter) * half
+        local cover
+        if cx and half > 0 then
+            if side == "left" then
+                local rl = edgeX(lb.root, "GetLeft")
+                cover = rl and (cx + edge - rl) or nil
+            else
+                local rr = edgeX(lb.root, "GetRight")
+                cover = rr and (rr - (cx - edge)) or nil
+            end
+        end
+        local inset = I
+        if cover and cover > 0 and cover <= P.max * w then inset = cover + I end
+        if side == "left" then l = inset else r = inset end
+    end
+    return l, r, math.max(1, w - l - r)
+end
+
 local function layoutEntry(e, frameId)
     local lb = e.lb
     local h, w, I = lb.h or 10, lb.w or 100, Text.SIZE.inset
@@ -624,12 +734,16 @@ local function layoutEntry(e, frameId)
         floats[e] = true
     else
         local px = pixel(e.frame)
+        -- mittig im freien Teil der Roehre (nicht unter Ring oder Kappen-Rundung)
+        local l, r, fw = Text.Span(e)
+        local cx = (l - r) / 2
         -- e.hi = Schattenkante (hoeher), e.lo = Lichtkante (tiefer); Zeichenebenen lo < hi < main (newEntry)
         local pts = { { e.main, 0, 0 }, { e.hi, 0, E.darkPx * px }, { e.lo, 0, -E.lightPx * px } }
         for _, p in ipairs(pts) do
             p[1]:SetJustifyH("CENTER")
             p[1]:ClearAllPoints()
-            p[1]:SetPoint("CENTER", lb.root, "CENTER", p[2], p[3])
+            p[1]:SetPoint("CENTER", lb.root, "CENTER", cx + p[2], p[3])
+            p[1]:SetWidth(fw)
         end
     end
 end
@@ -757,6 +871,7 @@ function Text.Attach(sk, frameId)
     end
     st.frameId = frameId or sk.id
     local cfg = Text.Config(st.frameId)
+    local both = Text.BlizzardMode() == "BOTH"
     for _, kind in ipairs(Text.BARS) do
         local c = cfg[kind]
         local fmt, display = c.format, c.display
@@ -766,13 +881,18 @@ function Text.Attach(sk, frameId)
                 -- Blizzards Lage: Blizzards eigener Text (Blizzard-Schrift, die Schrift-Einstellungen wirken dort nicht);
                 -- mittig: unser Text, Schrift/Kontur/Schatten aus dem Reiter Schrift (wie am echten Rahmen)
                 fmt, display, mirror, color = "pattern", c.place == "center" and "glass" or "blizzard", true, "white"
-                if c.place ~= "center" then -- Blizzards Lage nachgebildet (Anker der Vorschau, sonst mittig)
-                    anchor, split = st.blizzAnchor and st.blizzAnchor[kind] or nil, true
+                if c.place ~= "center" then
+                    -- BOTH wie am echten Rahmen geteilt im freien Teil der Roehre, sonst an der Ersatz-Leiste (Blizzards TextString)
+                    if both then split = true else anchor = st.blizzAnchor and st.blizzAnchor[kind] or nil end
                 end
             end
         elseif fmt == "blizzard" and c.place == "center" then
             -- mittig: Blizzards Text verdeckt, eigener mit seinem Muster; unser FontString folgt dem Reiter Schrift
             fmt, display, mirror, color = "pattern", "glass", true, "white"
+        elseif fmt == "blizzard" and both then
+            -- BOTH an Blizzards Stelle: LeftText/RightText laegen unter dem Ring bzw. auf den Roehrenenden => verdeckt, eigene
+            -- Kopien links/rechts im freien Teil der Roehre, in Blizzards Schrift und Farbe
+            fmt, display, mirror, color, split = "pattern", "blizzard", true, "white", true
         elseif testOn and not Text.Shows(fmt) then
             fmt, display = Text.TEST_FORMAT, Text.TEST_DISPLAY
         end
@@ -785,7 +905,8 @@ function Text.Attach(sk, frameId)
                 st.entries[kind] = e
             end
             e.fmt, e.display, e.color, e.values, e.mirror = fmt, display, color, st.values, mirror
-            e.anchor, e.split = anchor, split
+            e.anchor, e.split, e.sk = anchor, split, sk
+            e.zeroBlank = mirror and sk.id == "target" -- Blizzards Zielrahmen: Wert 0 zeigt nichts
             layoutEntry(e, st.frameId)
             pcall(e.frame.SetClipsChildren, e.frame, anchor == nil) -- Blizzards Lage darf unter der Roehre liegen
             e.frame:Show()
