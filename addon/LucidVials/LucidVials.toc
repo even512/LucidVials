@@ -14,6 +14,12 @@
 
 Locales\enUS.lua
 Locales\deDE.lua
+Locales\profiles.lua
+Locales\config.lua
+Locales\font.lua
+Locales\text.lua
+Locales\portrait.lua
+Locales\preview.lua
 Core.lua
 Compat.lua
 Store.lua
@@ -25,11 +31,23 @@ LiquidBorder.lua
 LiquidFx.lua
 LiquidFizz.lua
 modules\UnitFrames\UnitFrames.lua
+modules\UnitFrames\Schema.lua
 modules\UnitFrames\Skin.lua
 modules\UnitFrames\Deco.lua
+modules\UnitFrames\Portrait.lua
+modules\UnitFrames\PortraitModel.lua
 modules\UnitFrames\XP.lua
+Fonts.lua
+modules\UnitFrames\Text.lua
+modules\UnitFrames\Preview.lua
 UI\ConfigWidgets.lua
 UI\CopyBox.lua
 UI\Config.lua
-UI\ConfigFrames.lua
+UI\ConfigGeneral.lua
+UI\ConfigLiquid.lua
+UI\ConfigProfiles.lua
+UI\ConfigText.lua
+UI\ConfigPortrait.lua
 UI\ConfigSettings.lua
+UI\ConfigFont.lua
+UI\ConfigPreview.lua

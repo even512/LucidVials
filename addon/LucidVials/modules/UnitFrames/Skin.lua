@@ -13,10 +13,12 @@
 --     (wie bei Blizzard) abgefragt (TOT_POLL). Werte gehen unveraendert (oft secret) an die eigene StatusBar.
 -- Blizzards Lebens-/Ressourcentext, Heilvorhersage und Absorb bleiben sichtbar: die Roehren liegen auf einer Ebene UNTER
 -- Blizzards Leiste. Fremde Einheitenrahmen-Addons (CONFLICT_ADDONS) => der Skin bleibt aus. Im Fahrzeug bleibt der
--- Spielerrahmen Blizzard (eigene Fahrzeug-Optik). Optionen: Reiter "Rahmen" (UI/ConfigFrames.lua) und /vials on|off|test|debug
+-- Spielerrahmen Blizzard (eigene Fahrzeug-Optik). Optionen: Reiter "Allgemein"/"Fluessigkeit" (UI/ConfigGeneral.lua, UI/ConfigLiquid.lua) und /vials on|off|test|debug
 -- und /vials slosh (E3: Schwappen aus der Bewegungsphysik ns.LiquidPhysics, Regler unitframes.liquid.slosh*) sowie
 -- /vials style kante|kolben (Darstellung unitframes.liquid.style: Fluessigkeitskante oder Kolben-Kammer) und
 -- /vials fx|debuffs on|off (Effekte aus LiquidFx.lua: Schaden, Heilung, Ressourcen-Strom; Schwaechungs-Schlieren).
+-- Profil-Schema 2 (Schema.lua): Werte "fuer alle" plus Eigenwerte je Rahmen; die Fluessigkeit (style/smooth/trail/fx/debuffs)
+-- wirkt je Rahmen, das Schwappen global. Weitere Module haengen sich ueber Skin.OnConfigChanged und Skin.RegisterTest an.
 local _, ns = ...
 local Compat, Store, L = ns.Compat, ns.Store, ns.L
 local Style, Liquid, Physics = ns.Style, ns.Liquid, ns.LiquidPhysics
@@ -27,7 +29,6 @@ UnitFrames.Skin = Skin
 ns.UnitFrameSkin = Skin
 
 Skin.FRAMES = { "player", "target", "tot" }
-local FRAME_SET = { player = true, target = true, tot = true }
 Skin.TOT_POLL = 0.25             -- s, Abfrage des Ziels des Ziels
 Skin.TEST_STEP = 1.6             -- s je Testwert
 Skin.TEST_MAX = 100
@@ -85,92 +86,68 @@ Skin.SPEC = SPEC
 Skin.CONFLICT_ADDONS = { "ElvUI", "ShadowedUnitFrames", "PitBull4", "UnitFramesLite", "XPerl", "EasyFrames", "GlassUnitFrames" }
 
 -- Profil ----------------------------------------------------------------------------------------------------------------
--- Auren-Groesse am Ziel (unitframes.auraSize, ganze Pixel/UI-Einheiten; Deco.lua legt Knoepfe, Abstaende und Reihen danach aus)
-Skin.AURA_SIZE = { default = 22, min = 14, max = 36 }
-
-function Skin.Defaults()
-    return { enabled = true, frames = { player = true, target = true, tot = true }, xp = true, auraSize = Skin.AURA_SIZE.default,
-        liquid = { smooth = true, trail = true, slosh = true, sloshStrength = 0.6, sloshDamping = 0.4, style = "piston",
-            fx = true, debuffs = true } }
-end
-
--- Felder unter liquid: "bool", "unit" (Zahl 0..1) oder "style" (Darstellung "edge" = Fluessigkeitskante, "piston" =
--- Kolben-Kammer). Fehlende Felder (aeltere Profile) kommen aus Skin.Defaults.
-local LIQUID_KEYS = { smooth = "bool", trail = "bool", slosh = "bool", sloshStrength = "unit", sloshDamping = "unit",
-    style = "style", fx = "bool", debuffs = "bool" }
-Skin.STYLES = { edge = true, piston = true }
-
-local function validLiquid(kind, v)
-    if kind == "bool" then return type(v) == "boolean" end
-    if kind == "style" then return type(v) == "string" and Skin.STYLES[v] == true end
-    return type(v) == "number" and v == v and v >= 0 and v <= 1
-end
-
---- Abschnitt "unitframes" pruefen: vollstaendige bereinigte Kopie oder nil, Feldname
-function Skin.Validate(v)
-    if type(v) ~= "table" then return nil, "type" end
-    local out = Skin.Defaults()
-    for k, x in pairs(v) do
-        if k == "enabled" or k == "xp" then -- xp: Erfahrungsleiste als Roehre (XP.lua)
-            if type(x) ~= "boolean" then return nil, k end
-            out[k] = x
-        elseif k == "auraSize" then
-            local R = Skin.AURA_SIZE
-            if type(x) ~= "number" or x ~= x or x ~= math.floor(x) or x < R.min or x > R.max then return nil, k end
-            out[k] = x
-        elseif k == "frames" then
-            if type(x) ~= "table" then return nil, k end
-            for fk, fv in pairs(x) do
-                if FRAME_SET[fk] then
-                    if type(fv) ~= "boolean" then return nil, k .. "." .. tostring(fk) end
-                    out.frames[fk] = fv
-                end -- unbekannte Rahmen fallen weg
-            end
-        elseif k == "liquid" then
-            if type(x) ~= "table" then return nil, k end
-            for lk, lv in pairs(x) do
-                if LIQUID_KEYS[lk] then
-                    if not validLiquid(LIQUID_KEYS[lk], lv) then return nil, k .. "." .. tostring(lk) end
-                    out.liquid[lk] = lv
-                end
-            end
-        end -- unbekannte Felder fallen weg
-    end
-    return out
-end
+-- Schema 2 (Schema.lua): Werte "fuer alle" plus Eigenwerte je Rahmen (unitframes.per), Bereiche per Skin.RegisterArea.
+local Schema = ns.UnitFrameSchema
+Skin.AURA_SIZE = Schema.AURA_SIZE
+Skin.STYLES = Schema.STYLES
+Skin.Defaults = Schema.Defaults
+Skin.Validate = Schema.Validate
+Skin.RegisterArea = Schema.RegisterArea
 
 Store.RegisterSection("unitframes", { default = Skin.Defaults, validate = Skin.Validate })
 
-function Skin.GetConfig()
-    local stored
-    if Store.db then
-        local p = Store.GetActive()
-        stored = p and p.unitframes
-    end
-    return (type(stored) == "table" and Skin.Validate(stored)) or Skin.Defaults()
+local function storedConfig()
+    if not Store.db then return nil end
+    local p = Store.GetActive()
+    return p and p.unitframes
 end
 
---- Feld setzen (path z. B. "enabled", "frames.tot", "liquid.trail"); nur nach Pruefung im Profil. Liefert true oder nil.
-function Skin.Set(path, value)
-    local p = Store.GetActive()
-    local cand = Store.DeepCopy(type(p.unitframes) == "table" and p.unitframes or Skin.Defaults())
-    local a, b = tostring(path):match("^([^%.]+)%.?(.*)$")
-    if b ~= "" then
-        if type(cand[a]) ~= "table" then cand[a] = {} end
-        cand[a][b] = value
-    else
-        cand[a] = value
-    end
-    local clean = Skin.Validate(cand)
-    if not clean then return nil end
-    local chk = clean[a]
-    if b ~= "" then
-        if type(chk) == "table" then chk = chk[b] else chk = nil end
-    end
-    if chk ~= value then return nil end -- unbekanntes Feld
-    p.unitframes = clean
+--- wirksame Einstellungen: ohne frameId "fuer alle" (wie bisher), mit frameId ("player"|"target"|"tot") die aufgeloesten
+--- Werte des Rahmens; "xp" (XP-Roehre) erbt "fuer alle"
+function Skin.GetConfig(frameId)
+    local stored = storedConfig()
+    local c = (type(stored) == "table" and (Skin.Validate(stored))) or Skin.Defaults()
+    return Schema.Resolve(c, frameId)
+end
+
+function Skin.GetFrameConfig(frameId) return Skin.GetConfig(frameId) end
+
+-- Beobachter: fn(frameId|nil, area|nil) nach jeder Aenderung (nil, nil = Profilwechsel/-neuinhalt)
+local changeListeners = {}
+function Skin.OnConfigChanged(fn)
+    assert(type(fn) == "function", "LucidVials: OnConfigChanged braucht eine Funktion")
+    changeListeners[#changeListeners + 1] = fn
+end
+
+local function configChanged(frameId, area)
+    for _, fn in ipairs(changeListeners) do xpcall(function() fn(frameId, area) end, geterrorhandler()) end
+end
+
+local function commit(clean, frameId, area)
+    Store.GetActive().unitframes = clean
     Skin.Refresh()
+    configChanged(frameId, area)
     return true
+end
+
+--- Feld setzen (path z. B. "enabled", "frames.tot", "liquid.trail", "font.health.face"); nur nach Pruefung im Profil.
+--- frameId nil = "fuer alle", sonst Eigenwert des Rahmens (nur mit Skin.SetOverride an). Liefert true oder nil.
+function Skin.Set(path, value, frameId)
+    local clean, area = Schema.Apply(Store.GetActive().unitframes, path, value, frameId)
+    if not clean then return nil end
+    return commit(clean, frameId, area)
+end
+
+--- Eigenwert eines Bereichs fuer einen Rahmen an (kopiert "fuer alle") bzw. aus (erbt wieder). Liefert true oder nil.
+function Skin.SetOverride(frameId, area, on)
+    local clean = Schema.Override(Store.GetActive().unitframes, frameId, area, on == true)
+    if not clean then return nil end
+    return commit(clean, frameId, area)
+end
+
+function Skin.HasOverride(frameId, area)
+    local stored = storedConfig()
+    return Schema.HasOverride(type(stored) == "table" and (Skin.Validate(stored)) or nil, frameId, area)
 end
 
 -- Hilfen ----------------------------------------------------------------------------------------------------------------
@@ -459,13 +436,18 @@ local function restoreBlizzard(sk)
 end
 
 -- Aufbau ------------------------------------------------------------------------------------------------------------------
-local function fontPath()
-    if Style and Style.FontPath then return Style.FontPath("marcellus") end
-    return _G.STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
-end
-
-local function setFont(fs, size)
-    local ok, r = call(fs, "SetFont", fontPath(), size, "")
+--- Schrift eines Textes setzen (Fonts.lua, ns.Fonts): mit element ("name"|"level") gilt die gewaehlte Schrift samt Groesse, Kontur und
+--- Schatten des Rahmens frameId, size ist dann die Auto-Groesse (heutige Groesse); ohne element die feste Standard-Optik
+--- (Marcellus mit Tintenschatten) fuer Texte ohne eigene Einstellung (Aura-Zaehler).
+local function setFont(fs, size, element, frameId)
+    local F = ns.Fonts
+    if F then
+        if element then F.Apply(fs, element, frameId, size) else F.ApplyDefault(fs, size) end
+        return
+    end
+    -- ohne Fonts.lua: der bisherige Weg (Marcellus, Tintenschatten, Rueckfall auf die Standardschrift)
+    local path = (Style and Style.FontPath and Style.FontPath("marcellus")) or _G.STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+    local ok, r = call(fs, "SetFont", path, size, "")
     if not ok or r == false then call(fs, "SetFont", _G.STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", size, "") end
     local N = Skin.NAME
     call(fs, "SetShadowColor", N.shadow[1], N.shadow[2], N.shadow[3], N.shadow[4])
@@ -570,7 +552,7 @@ local function layout(sk)
         sk.plate:SetSize(ps, ps)
         sk.levelText:ClearAllPoints()
         sk.levelText:SetAllPoints(sk.plate)
-        setFont(sk.levelText, math.max(7, math.floor(ps * P.font + 0.5)))
+        setFont(sk.levelText, math.max(7, math.floor(ps * P.font + 0.5)), "level", sk.id)
         local c = Skin.NAME.color
         sk.levelText:SetTextColor(c[1], c[2], c[3])
     end
@@ -589,7 +571,7 @@ local function layout(sk)
         sk.name:SetPoint("BOTTOMRIGHT", sk.health.root, "TOPRIGHT", -N.x, padT + N.y)
         sk.name:SetJustifyH("LEFT")
     end
-    setFont(sk.name, S.nameSize)
+    setFont(sk.name, S.nameSize, "name", sk.id)
     sk.name:SetTextColor(N.color[1], N.color[2], N.color[3])
     if Skin.Deco then Skin.Deco.Layout(sk) end -- Roehrenenden am Ring (offen), Flansch, Zier-Lagen
 end
@@ -665,6 +647,7 @@ end
 --- Werte einspeisen. how = "snap" (sofort, Zielwechsel), "health", "maxhealth", "power", "maxpower"
 local function feed(sk, how)
     if not sk.applied then return end
+    if Skin.Text then Skin.Text.Update(sk, how) end -- Dauer-Zahlen (Text.lua)
     local u = SPEC[sk.id].unit
     if testActive then
         local hv, pv = testValue(sk.id == "target" and 3 or (sk.id == "tot" and 5 or 0)), testValue(2)
@@ -714,6 +697,12 @@ local function feed(sk, how)
     end
 end
 
+-- Mini-Vorschau (Preview.lua): derselbe Aufbau und dieselbe Lage auf einem Schein-Rahmen (sk.preview, eigene Ersatz-Regionen
+-- statt Blizzards Balken/Portrait; nie in skins, nie ausgeblendete Blizzard-Teile) und die Ressourcenfarbe des Spielers
+Skin.PreviewBuild = function(sk, root) return build(sk, root) end
+Skin.PreviewLayout = function(sk) return layout(sk) end
+Skin.PowerTint = function(sk) return powerTint(sk) end
+
 local function recolor(sk)
     if not sk.applied then return end
     Liquid.SetTint(sk.health, healthTint(sk))
@@ -728,6 +717,7 @@ local function refreshUnit(sk)
     feed(sk, "snap")
     hideBlizzard(sk) -- Blizzard kann Teile beim Zielwechsel neu gesetzt haben
     if Skin.Deco then Skin.Deco.Refresh(sk) end
+    if Skin.Portrait then Skin.Portrait.Refresh(sk) end -- Portrait-Stile (Portrait.lua): Textur/Pegel zur neuen Einheit
 end
 
 -- Anwenden / Zurueckstellen -------------------------------------------------------------------------------------------------
@@ -735,6 +725,8 @@ local function remove(sk)
     if not sk then return end
     if sk.applied then
         if Skin.Deco then pcall(Skin.Deco.Remove, sk) end
+        if Skin.Text then pcall(Skin.Text.Detach, sk) end -- Blizzards Statustext wieder Alpha 1
+        if Skin.Portrait then pcall(Skin.Portrait.Detach, sk) end -- vor restoreBlizzard: gibt Blizzards Portrait frei
         restoreBlizzard(sk)
         Liquid.SetHealGhost(sk.health, nil)
         for k in pairs(Liquid.SEGMENTS) do Liquid.SetSegment(sk.health, k, nil) end
@@ -790,21 +782,27 @@ local function apply(id)
         remove(sk) -- ohne Lebensleiste kein Skin (unbekannter Aufbau)
         return
     end
-    Liquid.SetStyle(sk.health, cfg.liquid.style) -- vor dem Layout (Reichweite der Fluessigkeit, Glut-Anker)
-    Liquid.SetStyle(sk.power, cfg.liquid.style)
+    local lq = Schema.Resolve(cfg, id).liquid -- Fluessigkeit je Rahmen (Eigenwert oder "fuer alle")
+    Liquid.SetStyle(sk.health, lq.style) -- vor dem Layout (Reichweite der Fluessigkeit, Glut-Anker)
+    Liquid.SetStyle(sk.power, lq.style)
     layout(sk)
+    if Skin.Portrait then
+        local okP, errP = pcall(Skin.Portrait.Attach, sk, id) -- Portrait-Stil aus dem Profil (Portrait.lua)
+        if not okP then recordError(errP) end
+    end
     -- ToT: keine Schadensspur - er wird abgefragt (TOT_POLL), eine Spur je Abfrage waere eine Timer-Flut
-    Liquid.SetOptions(sk.health, cfg.liquid.smooth, cfg.liquid.trail and id ~= "tot")
-    Liquid.SetOptions(sk.power, cfg.liquid.smooth, false)
+    Liquid.SetOptions(sk.health, lq.smooth, lq.trail and id ~= "tot")
+    Liquid.SetOptions(sk.power, lq.smooth, false)
     -- Effekte (LiquidFx): nicht beim ToT (abgefragt); Ressourcen-Strom und Schlieren nur beim Spieler
-    local fxOn = cfg.liquid.fx and id ~= "tot"
-    Liquid.SetFx(sk.health, id .. "-health", fxOn, cfg.liquid.debuffs and id == "player" or false)
+    local fxOn = lq.fx and id ~= "tot"
+    Liquid.SetFx(sk.health, id .. "-health", fxOn, lq.debuffs and id == "player" or false)
     Liquid.SetFx(sk.power, id .. "-power", fxOn and id == "player", false)
     hookFade(root)
     sk.holder:Show()
     Liquid.Show(sk.health)
     if sk.mb then Liquid.Show(sk.power) else Liquid.Hide(sk.power) end
     sk.applied = true
+    if Skin.Text then Skin.Text.Attach(sk, id) end -- Dauer-Zahlen (Text.lua)
     refreshUnit(sk)
     healGhost(sk)
 end
@@ -1107,6 +1105,7 @@ ns.RegisterModule("unitframes", {
 
 Store.RegisterCallback(function()
     if active then Skin.Refresh() end
+    configChanged(nil, nil) -- Profilwechsel/-neuinhalt: alle Bereiche aller Rahmen
 end)
 
 -- Slash /vials on|off|test|debug --------------------------------------------------------------------------------------
@@ -1128,6 +1127,13 @@ function Skin.Debug()
         yn(inVehicle()), yn(Liquid.CanGlide()))
     ns.Print("frames.config player=%s target=%s tot=%s smooth=%s trail=%s style=%s", yn(c.frames.player),
         yn(c.frames.target), yn(c.frames.tot), yn(c.liquid.smooth), yn(c.liquid.trail), c.liquid.style)
+    for _, id in ipairs(Skin.FRAMES) do -- Eigenwerte je Rahmen (Schema 2)
+        local own = type(c.per) == "table" and type(c.per[id]) == "table" and c.per[id].liquid
+        if type(own) == "table" then
+            ns.Print("frames.%s.liquid style=%s smooth=%s trail=%s fx=%s debuffs=%s", id, tostring(own.style), yn(own.smooth),
+                yn(own.trail), yn(own.fx), yn(own.debuffs))
+        end
+    end
     local ink = ns.LiquidFx and ns.LiquidFx.DebuffState() or { n = 0, secret = 0 }
     ns.Print("frames.fx on=%s debuffs=%s auras=%s ink=%d secret=%d", yn(c.liquid.fx), yn(c.liquid.debuffs),
         yn(ns.LiquidFx and ns.LiquidFx.IsListeningAuras()), ink.n or 0, ink.secret or 0)
@@ -1174,6 +1180,7 @@ function Skin.Debug()
     for _, name in ipairs(Skin.REAPPLY_HOOKS) do hooks[#hooks + 1] = name .. "=" .. tostring(hookStatus[name] or "-") end
     ns.Print("frames.hooks %s", table.concat(hooks, " "))
     if Skin.Deco then Skin.Deco.Debug() end
+    if Skin.Portrait then Skin.Portrait.Debug() end
     if Skin.XP then Skin.XP.Debug() end
     ns.Print("frames.driver active=%s errors=%d", yn(Style and Style.DriverActive and Style.DriverActive()), errorCount)
     for i, e in ipairs(errors) do ns.Print("frames.error.%d %s", i, (e:gsub("|", "||"))) end
@@ -1189,6 +1196,7 @@ local function testEffect(what, word)
     if what == "off" then
         if Fx then Fx.TestDebuffs({}) end
         if Skin.XP then Skin.XP.StopTest() end
+        if Skin.Text then Skin.Text.StopTest() end
         if testActive then
             Skin.ToggleTest()
             ns.Print(L.FRAMES_TEST_OFF)
@@ -1270,6 +1278,19 @@ function Skin.TestShield()
     return true
 end
 
+-- weitere Testwoerter der Module (/vials test <wort> [rest]); eingebaute Woerter gehen vor und sind nicht belegbar
+local testWords = {}
+Skin.XP_TEST_WORDS = { xp = true, xprest = true, levelup = true, stufe = true } -- XP.lua (falls noch nicht geladen)
+function Skin.RegisterTest(word, fn)
+    assert(type(word) == "string" and word == word:lower() and word:match("^[^%s%c|]+$") and type(fn) == "function",
+        "LucidVials: Testwort braucht Kleinbuchstaben ohne Leerzeichen und eine Funktion: " .. tostring(word))
+    local xpWords = (Skin.XP and Skin.XP.TEST_WORDS) or Skin.XP_TEST_WORDS
+    assert(not Skin.TEST_ARGS[word] and not xpWords[word] and not Skin.XP_TEST_WORDS[word] and word ~= "ziel"
+        and word ~= "target" and not testWords[word],
+        "LucidVials: Testwort schon belegt: " .. word)
+    testWords[word] = fn
+end
+
 UnitFrames.sub.test = function(arg)
     local word, rest = (arg or ""):lower():match("^%s*(%S*)%s*(.-)$")
     word = word or ""
@@ -1281,10 +1302,19 @@ UnitFrames.sub.test = function(arg)
         Skin.XP.TestCommand(word)
         return
     end
+    local custom = testWords[word]
+    if custom then
+        xpcall(function() custom(rest) end, geterrorhandler())
+        return
+    end
     if word ~= "" then
         local what = Skin.TEST_ARGS[word]
         if not what then
-            ns.Print(L.FRAMES_TEST_USAGE)
+            -- Wortliste samt der angemeldeten Testwoerter (Skin.RegisterTest: portrait, zahlen/numbers, ...)
+            local extra = {}
+            for w in pairs(testWords) do extra[#extra + 1] = w end
+            table.sort(extra)
+            ns.Print(L.FRAMES_TEST_USAGE, table.concat(extra, "||"))
             return
         end
         testEffect(what, word)
@@ -1302,7 +1332,10 @@ UnitFrames.sub.debug = function()
     local P, lines = ns.Print, {}
     ns.Print = function(fmt, ...)
         local ok, s = pcall(string.format, tostring(fmt), ...)
-        lines[#lines + 1] = ok and s or tostring(fmt)
+        s = ok and s or tostring(fmt)
+        -- Kopierfenster zeigt Rohtext: Chat-Escapes ("||" = "|", Farbcodes) wie im Chat dargestellt
+        local box = ns.CopyBox
+        lines[#lines + 1] = (box and box.Clean) and box.Clean(s) or s
         return P(fmt, ...)
     end
     local ok, err = pcall(Skin.Debug)

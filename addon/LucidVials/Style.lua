@@ -105,6 +105,8 @@ end
 Style.FONT_PATHS = { marcellus = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Fonts\\Marcellus-Regular.ttf" }
 local NON_LATIN = { koKR = true, zhCN = true, zhTW = true, ruRU = true }
 local function clientFont() return _G.STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF" end
+Style.NON_LATIN = NON_LATIN -- Clients ohne lateinische Schrift (auch fuer Fonts.lua)
+Style.ClientFont = clientFont
 
 --- Schriftpfad zu einem Schriftnamen ("marcellus"); sonst bzw. bei nicht-lateinischer Client-Sprache die Client-Schrift
 function Style.FontPath(face)

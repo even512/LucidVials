@@ -6,13 +6,17 @@
 --          LucidVialsDB.charProfile["Realm-Char"] = name   abweichendes Profil je Charakter (fehlt => "Default")
 --          LucidVialsDB.dispelIds            gelernte Dispel-Typ-IDs (LiquidFx.lua, global, kein Profilinhalt)
 --          LucidVialsDB.configPos            Position des Einstellungsfensters (UI/Config.lua)
+--          LucidVialsDB.previewBg            Hintergrund der Vorschau-Buehne "light" | "world" (fehlt = dunkel; UI/ConfigPreview.lua, global)
+--
+-- Schema 2 (Ausbau 1.1.0): der Abschnitt "unitframes" kann Eigenwerte je Rahmen tragen (unitframes.per, siehe
+-- modules/UnitFrames/Schema.lua). Eine aeltere Version liest eine Schema-2-DB weiter (DB_NEWER, neue Felder ignoriert).
 local _, ns = ...
 local L = ns.L
 
 local Store = {}
 ns.Store = Store
 
-Store.SCHEMA = 1            -- aktuelle Schema-Version (DB und Profilinhalt)
+Store.SCHEMA = 2            -- aktuelle Schema-Version (DB und Profilinhalt)
 Store.DEFAULT = "Default"
 Store.NAME_MAX = 48         -- Bytes
 
@@ -23,7 +27,14 @@ Store.migrations = {
         if type(db.charProfile) ~= "table" then db.charProfile = {} end
     end,
 }
-Store.profileMigrations = {}
+Store.profileMigrations = {
+    -- 1 -> 2: alle bisherigen Werte gelten "fuer alle" (sie bleiben, wo sie sind), Eigenwerte je Rahmen gibt es noch keine.
+    -- Ungueltige Felder fallen beim Lesen feldweise auf ihren Standard (Schema.Validate).
+    [2] = function(p)
+        local uf = p.unitframes
+        if type(uf) == "table" then uf.per = nil end
+    end,
+}
 
 -- Abschnitte ------------------------------------------------------------------------------------
 local sections, sectionOrder = {}, {}
@@ -70,6 +81,14 @@ function Store.SanitizeProfile(data)
     end
     return clean
 end
+
+-- Fehlertexte ------------------------------------------------------------------------------------
+--- Fehlercode (+ optionales Argument, z. B. Profilname) als Text in Client-Sprache
+function Store.ErrorText(code, arg)
+    return (L[code]):format(tostring(arg or ""))
+end
+
+local function fail(code, arg) return nil, code, arg end
 
 -- Namen ------------------------------------------------------------------------------------------
 --- gueltiger Profilname (getrimmt) oder nil. Keine Steuerzeichen, kein "|" (Escape-Zeichen im Chat).
@@ -166,11 +185,98 @@ function Store.GetProfile(name)
     return requireDb().profiles[name]
 end
 
+--- Namen aller Profile, "Default" zuerst, dann alphabetisch
+function Store.ListProfiles()
+    local out = {}
+    for name in pairs(requireDb().profiles) do
+        if name ~= Store.DEFAULT then out[#out + 1] = name end
+    end
+    table.sort(out)
+    table.insert(out, 1, Store.DEFAULT)
+    return out
+end
+
+--- vorhandenes Profil zum (getrimmten) Namen oder nil
+local function existing(name)
+    local clean = Store.ValidName(name)
+    if clean and requireDb().profiles[clean] then return clean end
+    return nil
+end
+
+local function newName(name)
+    local clean = Store.ValidName(name)
+    if not clean then return fail("PROFILE_NAME_INVALID") end
+    if requireDb().profiles[clean] then return fail("PROFILE_EXISTS", clean) end
+    return clean
+end
+
+--- neues Profil mit Startwerten bzw. als Kopie von copyFrom. Liefert den (getrimmten) Namen oder nil, Code, Argument.
+function Store.CreateProfile(name, copyFrom)
+    local d = requireDb()
+    local src
+    if copyFrom ~= nil then
+        src = existing(copyFrom)
+        if not src then return fail("PROFILE_NOT_FOUND", Store.ValidName(copyFrom)) end
+    end
+    local clean, code, arg = newName(name)
+    if not clean then return nil, code, arg end
+    d.profiles[clean] = src and deepCopy(d.profiles[src]) or Store.NewProfile()
+    return clean
+end
+
+--- Profil umbenennen ("Default" nicht); Charaktere, die es nutzen, folgen dem neuen Namen
+function Store.RenameProfile(old, new)
+    local d = requireDb()
+    local from = existing(old)
+    if from == Store.DEFAULT then return fail("PROFILE_DEFAULT_PROTECTED") end
+    if not from then return fail("PROFILE_NOT_FOUND", Store.ValidName(old)) end
+    local clean, code, arg = newName(new)
+    if not clean then return nil, code, arg end
+    local wasActive = Store.GetActiveName() == from
+    d.profiles[clean], d.profiles[from] = d.profiles[from], nil
+    for key, n in pairs(d.charProfile) do
+        if n == from then d.charProfile[key] = clean end
+    end
+    if wasActive then notify("rename") end
+    return clean
+end
+
+--- Profil loeschen ("Default" nicht); Charaktere, die es nutzen, fallen auf "Default" zurueck
+function Store.DeleteProfile(name)
+    local d = requireDb()
+    local clean = existing(name)
+    if clean == Store.DEFAULT then return fail("PROFILE_DEFAULT_PROTECTED") end
+    if not clean then return fail("PROFILE_NOT_FOUND", Store.ValidName(name)) end
+    local wasActive = Store.GetActiveName() == clean
+    d.profiles[clean] = nil
+    for key, n in pairs(d.charProfile) do
+        if n == clean then d.charProfile[key] = nil end
+    end
+    if wasActive then notify("active") end
+    return true
+end
+
+--- Profil fuer den aktuellen Charakter waehlen (nil oder "Default" = keine eigene Zuordnung)
+function Store.SetCharProfile(name)
+    local d = requireDb()
+    local clean = Store.DEFAULT
+    if name ~= nil then
+        clean = existing(name)
+        if not clean then return fail("PROFILE_NOT_FOUND", Store.ValidName(name)) end
+    end
+    local key = charKey()
+    if not key then return fail("PROFILE_NO_CHAR") end
+    local before = Store.GetActiveName()
+    d.charProfile[key] = (clean ~= Store.DEFAULT) and clean or nil
+    if before ~= clean then notify("active") end
+    return true
+end
+
 --- Profil auf die Startwerte zuruecksetzen (Tabelle bleibt dieselbe, Verweise bleiben gueltig)
 function Store.ResetProfile(name)
     local d = requireDb()
     local p = d.profiles[name]
-    if not p then return nil, "PROFILE_NOT_FOUND" end
+    if not p then return fail("PROFILE_NOT_FOUND", Store.ValidName(name)) end
     for k in pairs(p) do p[k] = nil end
     for k, v in pairs(Store.NewProfile()) do p[k] = v end
     if Store.GetActiveName() == name then notify("reset") end

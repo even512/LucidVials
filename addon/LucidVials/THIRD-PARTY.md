@@ -13,12 +13,20 @@ target frame (and puts it back); no file of Questie is included and nothing is w
 
 ## Fonts
 
-One font in `Fonts\`, under the SIL Open Font License 1.1. It is not renamed or modified.
-The license text is `Fonts\OFL-Marcellus.txt`.
+Four fonts in `Fonts\`, each under the SIL Open Font License 1.1. They are not renamed or modified (byte-identical to the
+files in the Google Fonts repository, `ofl/<name>`). The license text of each font lies next to it as `Fonts\OFL-<Name>.txt`.
+Marcellus is the default; the others are offered in the font tab of the settings window.
 
 | Font | File | Copyright holder | Reserved Font Name (RFN) | Source |
 |---|---|---|---|---|
 | Marcellus | `Fonts\Marcellus-Regular.ttf` | Brian J. Bonislawsky DBA Astigmatic (AOETI) | "Marcellus" | see `Fonts\OFL-Marcellus.txt` |
+| Philosopher | `Fonts\Philosopher-Regular.ttf` | The Philosopher Project Authors (https://github.com/alexeiva/philosopher) | none | see `Fonts\OFL-Philosopher.txt` |
+| Almendra | `Fonts\Almendra-Regular.ttf` | Ana Sanfelippo | "Almendra" | see `Fonts\OFL-Almendra.txt` |
+| MedievalSharp | `Fonts\MedievalSharp.ttf` | wmk69 | "MedievalSharp" | see `Fonts\OFL-MedievalSharp.txt` |
+
+Also offered in the font tab, but not part of the package: the Blizzard fonts (Friz Quadrata, Arial Narrow, Morpheus,
+Skurri), used through the game's own font objects, and the fonts of other addons that register with LibSharedMedia-3.0.
+Lucid Vials only reads that list (`LibStub`, `List`, `Fetch`); LibSharedMedia is not included.
 
 ## Graphics and media
 

@@ -331,6 +331,7 @@ local function feed(st, snap, glow)
     if rested and nv and nm and ne and ne > 0 and nm > 0 then endV = math.min(nv + ne, nm) end
     if endV then Liquid.SetReserve(lb, endV, nm, snap) end
     Liquid.ShowReserve(lb, endV ~= nil)
+    if Skin.Text then Skin.Text.UpdateXP(st, okV, v, okM, mx, ne) end -- XP-Zahlen (Text.lua)
     local gain, big = false, false
     if not snap then
         if nv and st.lastV and nm and nm > 0 then
@@ -363,6 +364,7 @@ end
 local function remove(st)
     if not st.applied then return end
     st.applied = false
+    if Skin.Text then Skin.Text.DetachXP(st) end
     restore(st)
     Liquid.SetFx(st.lb, nil, false, false)
     Liquid.Hide(st.lb)
@@ -381,6 +383,7 @@ local function apply(st)
     Liquid.Show(st.lb)
     st.applied = true
     hideBlizzard(st)
+    if Skin.Text then Skin.Text.AttachXP(st) end -- XP-Zahlen (Text.lua)
     collectArt(st)
     syncArt(st)
     -- Teiler, die Blizzard erst nach dem Laden anlegt: kurz danach noch zweimal nachsammeln

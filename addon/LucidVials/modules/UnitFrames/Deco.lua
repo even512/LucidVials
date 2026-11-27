@@ -22,6 +22,8 @@
 --     Buffs unter den Roehren; fehlt die Vorlage, bleiben Blizzards Auren sichtbar. Groesse: unitframes.auraSize (Standard 22,
 --     14-36, /vials auren), wirkt sofort (vorhandene Knoepfe werden umdimensioniert).
 -- /vials test ziel <art> zeigt die Zier ohne passendes Ziel (am Ziel bzw. an einem eigenen Testrahmen).
+-- Mini-Vorschau (Preview.lua, sk.preview): Ziel-Art je Instanz (sk.previewKind statt des modulglobalen S.test), ohne Auren,
+-- Raidmarker und Quest-Symbol, Stufe aus sk.previewLevel; echte Ziele und Questie bleiben unberuehrt.
 local _, ns = ...
 local Compat, L = ns.Compat, ns.L
 local Style, Liquid = ns.Style, ns.Liquid
@@ -422,7 +424,7 @@ function Deco.Build(sk)
     if Skin.SOCKET.ids[sk.id] then sk.socket = newTex(sk.ringFrame, "ARTWORK", Skin.SOCKET.path) end
     if sk.id ~= "target" then return end
     buildTarget(sk)
-    buildAuras(sk)
+    if not sk.preview then buildAuras(sk) end -- Vorschau: keine Auren (der Container zeigte die des echten Ziels)
 end
 
 -- Lage --------------------------------------------------------------------------------------------------------------------
@@ -489,7 +491,7 @@ local function layoutTarget(sk)
         sk.levelText:ClearAllPoints()
         sk.levelText:SetPoint("CENTER", sk.plate, "TOPLEFT", P.cx * ps, -P.cy * ps)
         sk.levelText:SetSize(2 * P.r * ps, 2 * P.r * ps)
-        Skin.SetFont(sk.levelText, math.max(7, math.floor(ps * Lt.levelFont + 0.5)))
+        Skin.SetFont(sk.levelText, math.max(7, math.floor(ps * Lt.levelFont + 0.5)), "level", sk.id)
         sk.skull:ClearAllPoints()
         sk.skull:SetPoint("CENTER", sk.plate, "TOPLEFT", P.cx * ps, -P.cy * ps)
         sk.skull:SetSize(ps * Lt.skull, ps * Lt.skull)
@@ -567,6 +569,10 @@ local function restoreLevel(sk)
         sk.levelText:SetText("30")
         return
     end
+    if sk.preview then
+        sk.levelText:SetText(tostring(sk.previewLevel or 30))
+        return
+    end
     local ok, lvl = pcall(UnitLevel, "target")
     if not ok then return end
     if Compat.IsSecret(lvl) then
@@ -581,7 +587,9 @@ end
 function Deco.UpdateLevel(sk)
     if not sk.gem then return end
     local skull, color
-    if S.test then
+    if sk.preview then
+        skull, color = sk.previewKind == "boss", Deco.GEM_TEST
+    elseif S.test then
         skull, color = S.test == "boss", Deco.GEM_TEST
     else
         local _, sk2 = Deco.Classify("target")
@@ -699,7 +707,11 @@ end
 --- Klassifikations-Zier
 local function refreshKind(sk)
     local kind, _, raw
-    if S.test then
+    if sk.preview then
+        local pk = sk.previewKind
+        kind = (pk and pk ~= "normal" and Deco.KIND_TEX[pk]) and pk or nil
+        raw = "preview"
+    elseif S.test then
         kind = S.test ~= "normal" and S.test or nil
         raw = "test"
     elseif unitExists("target") then
@@ -725,6 +737,10 @@ end
 local function refreshTarget(sk)
     refreshKind(sk)
     Deco.UpdateLevel(sk)
+    if sk.preview then -- Vorschau: kein Raidmarker, kein Quest-Symbol (haengen am echten Ziel)
+        for _, t in ipairs({ sk.mIcon, sk.mSock, sk.qIcon, sk.qSock }) do t:Hide() end
+        return
+    end
     refreshMarker(sk)
     safe(refreshQuest, sk) -- Questie-Fehler bricht den Rest nicht ab
 end
@@ -767,6 +783,11 @@ end
 function Deco.Refresh(sk)
     if sk.id ~= "target" or not sk.zBack then return end
     refreshTarget(sk)
+    if sk.preview then
+        sk.endsTries = 0
+        layoutEnds(sk)
+        return
+    end
     safe(refreshAuras, sk)
     hookQuestie()
     hookQuestieNameplate()
@@ -787,7 +808,7 @@ function Deco.HideBlizzard(sk)
 end
 
 function Deco.Remove(sk)
-    if sk.id == "target" then syncQuestieTarget(false) end
+    if sk.id == "target" and not sk.preview then syncQuestieTarget(false) end
     for _, key in ipairs({ "health", "power" }) do
         if sk[key] then Liquid.SetOpenEnd(sk[key], nil) end
     end

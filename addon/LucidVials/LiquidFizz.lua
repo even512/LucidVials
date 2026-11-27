@@ -121,17 +121,20 @@ local function hideAll(fz)
     fz.sOuter:Hide()
 end
 
---- an/aus (Rolle "player-power" und Effekte an)
-function Fizz.Configure(lb, on)
+--- an/aus (Rolle "player-power" bzw. "preview-power" und Effekte an). own = Roehre der Mini-Vorschau (Preview.lua): sprudelt
+--- nur im eigenen Test (Fizz.TestTube), echte Ressourcen-Ereignisse und /vials test mana erreichen sie nie
+function Fizz.Configure(lb, on, own)
     local fz = lb.fx and lb.fx.fizz
     if not fz then return end
     fz.on = on == true
+    fz.own = own == true
+    if not fz.on or fz.own then fz.testUntil = 0 end
     if not fz.on then
         fz.a, fz.shownA = 0, nil
         hideAll(fz)
     end
     Fizz.UpdateListening()
-    if fz.on then pcall(update) end
+    if fz.on and not fz.own then pcall(update) end
 end
 
 function Fizz.SetLevel(lb, level)
@@ -192,7 +195,7 @@ local function setInner(alpha)
     local okAll = true
     for lb in pairs(tubes) do
         local fz = lb.fx and lb.fx.fizz
-        if fz and fz.on then
+        if fz and fz.on and not fz.own then
             local ok1 = pcall(fz.inner.SetAlpha, fz.inner, alpha)
             local ok2 = pcall(fz.sInner.SetAlpha, fz.sInner, alpha)
             okAll = okAll and ok1 and ok2
@@ -205,7 +208,7 @@ local function wakeAll()
     local any = false
     for lb in pairs(tubes) do
         local fz = lb.fx and lb.fx.fizz
-        if fz and fz.on then
+        if fz and fz.on and not fz.own then
             lb.fx.busy = true
             any = true
         end
@@ -280,7 +283,7 @@ function Fizz.UpdateListening()
     local want = false
     for lb in pairs(tubes) do
         local fz = lb.fx and lb.fx.fizz
-        if fz and fz.on then want = true end
+        if fz and fz.on and not fz.own then want = true end
     end
     if want == listening then return end
     listening = want
@@ -315,6 +318,19 @@ function Fizz.Test()
     state.testUntil = now() + Fizz.CFG.testSecs
     setInner(1)
     wakeAll()
+end
+
+--- Mini-Vorschau: eine eigene Roehre CFG.testSecs s sprudeln lassen (unabhaengig vom Spieler-Zustand). Liefert true, wenn sie
+--- sprudeln darf (Effekte an).
+function Fizz.TestTube(lb)
+    local fz = lb and lb.fx and lb.fx.fizz
+    if not (fz and fz.on and fz.own) then return false end
+    fz.testUntil = now() + Fizz.CFG.testSecs
+    pcall(fz.inner.SetAlpha, fz.inner, 1)
+    pcall(fz.sInner.SetAlpha, fz.sInner, 1)
+    lb.fx.busy = true
+    if ns.Liquid.Wake then ns.Liquid.Wake() end
+    return true
 end
 
 -- Bild ------------------------------------------------------------------------------------------------------------------------
@@ -437,8 +453,15 @@ function Fizz.Step(lb, t, dt)
     local fz = lb.fx.fizz
     if not fz.on then return false end
     local C = Fizz.CFG
-    local want, sure, reason = decide(t)
-    state.reason = reason
+    local want, sure
+    if fz.own then -- Vorschau: nur der eigene Test
+        want = t < (fz.testUntil or 0)
+        sure = want
+    else
+        local reason
+        want, sure, reason = decide(t)
+        state.reason = reason
+    end
     local a = fz.a
     if want then a = math.min(1, a + dt * C.fadeIn) else a = math.max(0, a - dt * C.fadeOut) end
     fz.a = a

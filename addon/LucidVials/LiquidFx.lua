@@ -250,14 +250,25 @@ function Fx.Attach(lb)
     tubes[lb] = true
 end
 
+-- Rollen der Mini-Vorschau (Preview.lua): verhalten sich wie die Spieler-Rollen, echte Ereignisse (UNIT_COMBAT, UNIT_AURA,
+-- Ressourcen-Ereignisse) treiben sie aber nie; Schlieren mit eigenem Zustand je Roehre (fx.ink statt des globalen inkState)
+Fx.PREVIEW_ROLES = { ["preview-health"] = "player-health", ["preview-power"] = "player-power", ["preview-xp"] = "player-xp" }
+
 --- Rolle und Schalter (aus Skin.lua): role = "player-health"|"player-power"|"target-health"|... oder nil; on = Effekte,
---- debuffs = Schlieren (nur "player-health")
+--- debuffs = Schlieren (nur "player-health" bzw. "preview-health")
 function Fx.Configure(lb, role, on, debuffs)
     local fx = lb.fx
     if not fx then return end
     fx.role = role
     fx.on = on == true and role ~= nil
-    fx.debuffs = debuffs == true and role == "player-health" -- unabhaengig vom Effekt-Schalter
+    fx.preview = Fx.PREVIEW_ROLES[role] ~= nil
+    -- unabhaengig vom Effekt-Schalter
+    fx.debuffs = debuffs == true and (role == "player-health" or role == "preview-health")
+    if fx.preview and fx.debuffs then
+        fx.ink = fx.ink or { n = 0, kinds = {}, colors = {}, secret = 0 }
+    else
+        fx.ink = nil
+    end
     if not fx.on then
         fx.healT, fx.hitT, fx.glowT = nil, nil, nil
         for _, t in ipairs({ fx.glow, fx.sweep, fx.spark, fx.flash, fx.star, fx.splash, fx.halo, fx.core, fx.pulse }) do t:Hide() end
@@ -265,7 +276,9 @@ function Fx.Configure(lb, role, on, debuffs)
         if fx.burn then fx.burn:Hide() end
         if ns.Liquid.Nudge then ns.Liquid.Nudge(lb, 0, 0) end
     end
-    if fx.fizz then ns.LiquidFizz.Configure(lb, fx.on and role == "player-power") end
+    if fx.fizz then
+        ns.LiquidFizz.Configure(lb, fx.on and (role == "player-power" or role == "preview-power"), role == "preview-power")
+    end
     if not fx.debuffs then
         fx.tint:Hide()
         fx.extra:Hide()
@@ -576,6 +589,51 @@ end
 --- Treffer (crit: staerker)
 function Fx.Hit(crit)
     if forRole("player-health", startHit, crit and Fx.HIT.crit or 1) and ns.Liquid.Wake then ns.Liquid.Wake() end
+end
+
+--- Mini-Vorschau (Preview.lua): Effekt an genau einer Roehre ausloesen, ohne die anderen Roehren derselben Rolle - what =
+--- "heal" (wie /vials test heilung: ganze Fluessigkeit als gewonnen) | "hit" (Schadensspur ueber den leeren Teil) | "glow"
+--- (Zufluss-Leuchten). Nur bei eingeschalteten Effekten; Werte sind eigene, lesbare Zahlen der Vorschau. Liefert true, wenn
+--- die Roehre reagiert.
+function Fx.TestTube(lb, what, crit)
+    local fx = lb and lb.fx
+    if not (fx and fx.on) then return false end
+    if what == "heal" or what == "glow" then
+        if what == "heal" and fx.lastValue ~= nil then
+            if IMMEDIATE == nil then readEnum() end
+            setValue(fx.old, 0, IMMEDIATE)
+            push(fx.qOld, fx.lastValue, now())
+        end
+        startHeal(lb, fx, crit and Fx.HEAL.crit or 1)
+    elseif what == "hit" then
+        pcall(ns.Liquid.TestLoss, lb)
+        startHit(lb, fx, crit and Fx.HIT.crit or 1)
+    else
+        return false
+    end
+    if ns.Liquid.Wake then ns.Liquid.Wake() end
+    return true
+end
+
+--- Mini-Vorschau: Schlieren einer einzelnen Vorschau-Roehre (eigener Zustand fx.ink, Liste von Bannarten; leer = aus).
+--- Wirkt nur, wenn die Roehre Schlieren zeigt (Rolle "preview-health", Schalter an); der globale Zustand bleibt unberuehrt.
+function Fx.SetTubeDebuffs(lb, list)
+    local fx = lb and lb.fx
+    local ink = fx and fx.ink
+    if not (ink and fx.debuffs) then return false end
+    local kinds, colors = {}, {}
+    for _, k in ipairs(list or {}) do
+        if Fx.INK.colors[k] and #kinds < Fx.INK.max then
+            kinds[#kinds + 1] = k
+            colors[#colors + 1] = Fx.INK.colors[k]
+        end
+    end
+    ink.poisonCol, ink.darkCol, ink.poisonCols, ink.darkCols = nil, nil, {}, {}
+    ink.poison = false
+    for _, k in ipairs(kinds) do if k == "Poison" then ink.poison = true end end
+    ink.n, ink.kinds, ink.colors, ink.secret, ink.border = #kinds, kinds, colors, 0, 0
+    Fx.ApplyInk(lb)
+    return true
 end
 
 --- UNIT_COMBAT fuer "player": nur das Ereignis und (wenn lesbar) der Text; die Menge (secret) wird nie gelesen
@@ -1003,7 +1061,7 @@ function Fx.ScanDebuffs()
     inkState.n, inkState.kinds, inkState.colors, inkState.secret = #kinds, kinds, colors, nSecret
     inkState.border = nBorder
     for lb in pairs(tubes) do
-        if lb.fx and lb.fx.debuffs then Fx.ApplyInk(lb) end
+        if lb.fx and lb.fx.debuffs and not lb.fx.ink then Fx.ApplyInk(lb) end
     end
     return true
 end
@@ -1022,13 +1080,14 @@ function Fx.SetTestDebuffs(list)
     for _, k in ipairs(kinds) do if k == "Poison" then inkState.poison = true end end
     inkState.n, inkState.kinds, inkState.colors, inkState.secret, inkState.border = #kinds, kinds, colors, 0, 0
     for lb in pairs(tubes) do
-        if lb.fx and lb.fx.debuffs then Fx.ApplyInk(lb) end
+        if lb.fx and lb.fx.debuffs and not lb.fx.ink then Fx.ApplyInk(lb) end
     end
 end
 
 --- Farben auf die Ebenen einer Roehre (bei Aenderung, nie pro Bild)
 function Fx.ApplyInk(lb)
     local fx = lb.fx
+    local inkState = fx.ink or inkState -- Vorschau-Roehre: eigener Zustand (Fx.SetTubeDebuffs), sonst der globale
     -- Toenung: vorherrschende (erste) Art; secret => Farbe direkt (Alpha aus der Kurve), lesbar => weich ueberblenden
     local kind, col = inkState.kinds[1], inkState.colors[1]
     -- secret Auren: je Aura eigene Toen-/Abdunkel-Lage (Farbe und Deckkraft aus den Kurven, 0 ohne Bannart; kein SetAlpha danach)
@@ -1151,7 +1210,7 @@ end
 function Fx.UpdateDebuffListening()
     local want = false
     for lb in pairs(tubes) do
-        if lb.fx and lb.fx.debuffs then want = true end
+        if lb.fx and lb.fx.debuffs and not lb.fx.ink then want = true end
     end
     if want == debuffOn then return end
     debuffOn = want
@@ -1487,7 +1546,7 @@ local function stepTint(lb, fx, t, dt)
                 fx.tR, fx.tG, fx.tB = fx.tR + (tgt[1] - fx.tR) * k, fx.tG + (tgt[2] - fx.tG) * k, fx.tB + (tgt[3] - fx.tB) * k
             end
             local fl = 1
-            local kind = inkState.kinds[1]
+            local kind = (fx.ink or inkState).kinds[1]
             if kind == "Curse" and tgt then
                 fl = 1 - I.flicker * (0.5 + 0.5 * math.sin(t * 13.7) * math.sin(t * 5.3 + 1.1))
             elseif kind == "Poison" and tgt then -- Gift: langsames kraenkliches Pulsieren der Truebung

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0
+
+- Redesigned settings window with six tabs (General, Liquid, Portrait, Text & numbers, Font, Profiles) and its own values per frame.
+- A live preview sits beside every tab, with sliders for health, power and experience, a target type picker, test buttons and a dark, light or game-world background.
+- Every slider marks its default value, and a right-click resets it; dropdowns and checkboxes name their default too.
+- Choose the font for every text element: three new bundled fonts, the Blizzard fonts and the fonts of other addons via LibSharedMedia.
+- Health, power and experience can show a permanent value text, with several formats, a number that floats on the liquid level or one etched into the glass.
+- Blizzard-style numbers can stay in Blizzard's spot or sit centred in the tube.
+- The player and target portraits get four animated styles: living painting, submerged in the vial, a reacting model and a plain animated model.
+- The new Profiles tab lets every character use its own profile, with create, copy, rename and reset.
+- Out of the box everything looks exactly as before; all of this is optional.
+
 ## 1.0.2
 
 - The boss ornament on the target portrait now sits cleanly on the ring, and the quest symbol no longer covers a horn.
