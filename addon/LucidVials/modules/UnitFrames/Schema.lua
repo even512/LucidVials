@@ -90,18 +90,26 @@ end
 -- Felder: "bool", "unit" (Zahl 0..1) oder "style" (Darstellung "edge" = Fluessigkeitskante, "piston" = Kolben-Kammer).
 -- style/smooth/trail/fx/debuffs je Rahmen, slosh* global (Bewegungsphysik), regenPulse global (nur die eigene Mana-Roehre:
 -- Impuls beim Einsetzen der Regeneration nach der 5-Sekunden-Regel, Standard aus).
+-- Hotfix 1.1.3, global: regenCountdown (Ring am Ende der eigenen Mana-Roehre laeuft in 5 s voll, Standard aus), regenSeconds
+-- (Sekundenzahl im Ring, Standard an), healStrength ("ghost": Staerke der Heil-Vorschau, Schema.HEAL_STRENGTH, 1 = bisherige Optik).
 Schema.STYLES = { edge = true, piston = true }
+Schema.HEAL_STRENGTH = { min = 0.5, max = 2 }
 local LIQUID_KEYS = { smooth = "bool", trail = "bool", slosh = "bool", sloshStrength = "unit", sloshDamping = "unit",
-    style = "style", fx = "bool", debuffs = "bool", regenPulse = "bool" }
+    style = "style", fx = "bool", debuffs = "bool", regenPulse = "bool", regenCountdown = "bool", regenSeconds = "bool",
+    healStrength = "ghost" }
 
 function Schema.LiquidDefaults()
     return { smooth = true, trail = true, slosh = true, sloshStrength = 0.6, sloshDamping = 0.4, style = "piston",
-        fx = true, debuffs = true, regenPulse = false }
+        fx = true, debuffs = true, regenPulse = false, regenCountdown = false, regenSeconds = true, healStrength = 1 }
 end
 
 local function validLiquid(kind, v)
     if kind == "bool" then return type(v) == "boolean" end
     if kind == "style" then return type(v) == "string" and Schema.STYLES[v] == true end
+    if kind == "ghost" then
+        local H = Schema.HEAL_STRENGTH
+        return type(v) == "number" and v == v and v >= H.min and v <= H.max
+    end
     return type(v) == "number" and v == v and v >= 0 and v <= 1
 end
 
@@ -118,7 +126,7 @@ function Schema.ValidateLiquid(t)
 end
 
 Schema.RegisterArea("liquid", { defaults = Schema.LiquidDefaults, validate = Schema.ValidateLiquid,
-    global = { "slosh", "sloshStrength", "sloshDamping", "regenPulse" } })
+    global = { "slosh", "sloshStrength", "sloshDamping", "regenPulse", "regenCountdown", "regenSeconds", "healStrength" } })
 
 -- Abschnitt ---------------------------------------------------------------------------------------------------------------
 function Schema.Defaults()

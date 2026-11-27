@@ -54,6 +54,12 @@ add(en, {
     UI_LIQUID_SLOSH_GLOBAL = "Sloshing is one physics for all frames. Choose “All frames” above to change it.",
     UI_LIQUID_REGEN = "Show regeneration clearly",
     UI_LIQUID_REGEN_TIP = "Your own mana tube only: when mana regeneration starts again after the five-second rule, a bright pulse flashes at the end of the liquid and the bubbling starts at full strength. Applies to all frames.",
+    UI_LIQUID_COUNTDOWN = "Countdown to regeneration",
+    UI_LIQUID_COUNTDOWN_TIP = "Your own mana tube only: after each spell a small ring next to the end of the tube fills up over the five seconds until mana regeneration resumes. With “Show regeneration clearly” the pulse follows. Applies to all frames.",
+    UI_LIQUID_SECONDS = "Show seconds",
+    UI_LIQUID_SECONDS_TIP = "Shows the remaining seconds inside the countdown ring. Only with “Countdown to regeneration” switched on.",
+    UI_LIQUID_HEAL_STRENGTH = "Heal preview strength",
+    UI_LIQUID_HEAL_STRENGTH_TIP = "How strongly the incoming heal preview stands out from the liquid: higher values give a brighter, more opaque layer with a soft shimmer at its edge. 100 % is the usual look. Applies to all frames.",
 
     -- Profile
     UI_PROF_HEAD_ACTIVE = "Profile of this character",
@@ -121,6 +127,12 @@ add(de, {
     UI_LIQUID_SLOSH_GLOBAL = "Das Schwappen ist eine gemeinsame Physik für alle Rahmen. Wähle oben „Für alle Rahmen“, um es zu ändern.",
     UI_LIQUID_REGEN = "Regeneration deutlich zeigen",
     UI_LIQUID_REGEN_TIP = "Nur deine eigene Mana-Röhre: Setzt die Mana-Regeneration nach der Fünf-Sekunden-Regel wieder ein, blitzt am Ende der Flüssigkeit ein heller Impuls auf und das Sprudeln startet mit voller Stärke. Gilt für alle Rahmen.",
+    UI_LIQUID_COUNTDOWN = "Countdown bis zur Regeneration",
+    UI_LIQUID_COUNTDOWN_TIP = "Nur deine eigene Mana-Röhre: Nach jedem Zauber läuft neben dem Ende der Röhre ein kleiner Ring in den fünf Sekunden voll, bis die Mana-Regeneration wieder einsetzt. Mit „Regeneration deutlich zeigen“ folgt danach der Impuls. Gilt für alle Rahmen.",
+    UI_LIQUID_SECONDS = "Sekunden anzeigen",
+    UI_LIQUID_SECONDS_TIP = "Zeigt die restlichen Sekunden im Countdown-Ring. Nur mit eingeschaltetem „Countdown bis zur Regeneration“.",
+    UI_LIQUID_HEAL_STRENGTH = "Heil-Vorschau-Stärke",
+    UI_LIQUID_HEAL_STRENGTH_TIP = "Wie deutlich sich die Vorschau eingehender Heilung von der Flüssigkeit abhebt: Höhere Werte ergeben eine hellere, kräftigere Lage mit einem dezenten Schimmer an ihrer Kante. 100 % ist die gewohnte Optik. Gilt für alle Rahmen.",
 
 
     UI_PROF_HEAD_ACTIVE = "Profil dieses Charakters",

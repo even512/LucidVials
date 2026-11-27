@@ -1234,6 +1234,10 @@ local function stepPiston(lb, t)
         shiftV(lb, gh.line, y1, y1)
         gh.edge:SetVertexOffset(1, 0, y1)
         gh.edge:SetVertexOffset(3, 0, y1)
+        if gh.shine then
+            gh.shine:SetVertexOffset(1, 0, y1)
+            gh.shine:SetVertexOffset(3, 0, y1)
+        end
     end
     -- Tropfen: Flug, Landung am Glas im Luftspalt, Herunterrinnen, Verblassen
     if dropsOn then
@@ -1628,6 +1632,30 @@ end
 -- 18.11.: erste Fassung "zu unscheinbar" => kraeftiger, heller, leuchtende Vorderkante (edgeW x Hoehe, ADD)
 Liquid.GHOST = { alpha = 0.85, lighten = 0.55, bright = 2.0, glowAlpha = 1, pulseFrom = 0.6, pulseTo = 1, pulseDur = 0.8,
     edgeW = 1.2, edgeAlpha = 0.9, edgeWhite = 0.5 }
+-- Staerke (Option liquid.healStrength, Hotfix 1.1.3; Liquid.SetGhostStrength): s = 1 ist genau die Optik oben. s < 1: blasser
+-- (Deckkraft von Koerper, Licht und Kante x s). s > 1 (u = s - 1, bis 1): Deckkraft, Aufhellung und Leuchten wachsen um den
+-- Anteil u der Spanne bis zum Hoechstwert (BOOST), die Kante wird breiter, der Puls blendet weniger ab, dazu ein schmaler weisser
+-- Schimmer an der Vorderkante (shine, ADD, atmet mit dem Puls; erst ab s > 1 angelegt).
+Liquid.GHOST_STRENGTH = { min = 0.5, max = 2, default = 1 }
+Liquid.GHOST_BOOST = { lighten = 0.35, bright = 0.4, edgeW = 0.5, edgeWhite = 0.6, pulseFrom = 0.6, shineW = 0.45, shineA = 0.8 }
+
+--- Kennwerte des Geists bei Staerke s (Liquid.GHOST bei s = 1); fuer Tint/Layout und Tests
+function Liquid.GhostLook(s)
+    local G, B = Liquid.GHOST, Liquid.GHOST_BOOST
+    s = tonumber(s) or 1
+    if s ~= s then s = 1 end
+    local S = Liquid.GHOST_STRENGTH
+    s = math.max(S.min, math.min(S.max, s))
+    if s <= 1 then
+        return { alpha = G.alpha * s, lighten = G.lighten, bright = G.bright, glowAlpha = G.glowAlpha * s, edgeW = G.edgeW,
+            edgeAlpha = G.edgeAlpha * s, edgeWhite = G.edgeWhite, pulseFrom = G.pulseFrom, shineA = 0 }
+    end
+    local u = math.min(1, s - 1)
+    return { alpha = G.alpha + (1 - G.alpha) * u, lighten = G.lighten + (1 - G.lighten) * B.lighten * u,
+        bright = G.bright * (1 + B.bright * u), glowAlpha = G.glowAlpha, edgeW = G.edgeW * (1 + B.edgeW * u),
+        edgeAlpha = G.edgeAlpha + (1 - G.edgeAlpha) * u, edgeWhite = G.edgeWhite + (1 - G.edgeWhite) * B.edgeWhite * u,
+        pulseFrom = G.pulseFrom + (G.pulseTo - G.pulseFrom) * B.pulseFrom * u, shineA = B.shineA * u }
+end
 
 function Liquid.AddHealGhost(lb)
     if lb.ghost then return lb.ghost end
@@ -1653,6 +1681,7 @@ function Liquid.AddHealGhost(lb)
     local okA = pcall(function()
         local ag = g.inner:CreateAnimationGroup()
         local an = ag:CreateAnimation("Alpha")
+        g.pulse, g.pulseFrom = an, G.pulseFrom
         an:SetFromAlpha(G.pulseFrom)
         an:SetToAlpha(G.pulseTo)
         an:SetDuration(G.pulseDur)
@@ -1687,7 +1716,14 @@ function Liquid.LayoutHealGhost(lb)
     g.edge:ClearAllPoints()
     g.edge:SetPoint("TOPRIGHT", g.clip, "TOPRIGHT", 0, -top)
     g.edge:SetPoint("BOTTOMRIGHT", g.clip, "BOTTOMRIGHT", 0, 0)
-    g.edge:SetWidth(Liquid.GHOST.edgeW * h)
+    local look = Liquid.GhostLook(lb.ghostStrength)
+    g.edge:SetWidth(look.edgeW * h)
+    if g.shine then
+        g.shine:ClearAllPoints()
+        g.shine:SetPoint("TOPRIGHT", g.clip, "TOPRIGHT", 0, -top)
+        g.shine:SetPoint("BOTTOMRIGHT", g.clip, "BOTTOMRIGHT", 0, 0)
+        g.shine:SetWidth(Liquid.GHOST_BOOST.shineW * h)
+    end
     if g.mask then
         if lb.maskPath then pcall(g.mask.SetTexture, g.mask, lb.maskPath, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE") end
         g.mask:ClearAllPoints()
@@ -1698,8 +1734,9 @@ end
 
 --- Farbe des Geists aus der Fluessigkeitsfarbe: aufgehellt, durchscheinend
 function Liquid.TintHealGhost(lb)
-    local g, G = lb.ghost, Liquid.GHOST
+    local g = lb.ghost
     if not g then return end
+    local G = Liquid.GhostLook(lb.ghostStrength)
     local r, gg, b = lb.liqR or 1, lb.liqG or 1, lb.liqB or 1
     local k, P = G.lighten, Liquid.PISTON
     local br = P.bodyBright * G.bright
@@ -1709,6 +1746,42 @@ function Liquid.TintHealGhost(lb)
     g.line:SetVertexColor(wr, wg, wb, G.glowAlpha)
     local ew = G.edgeWhite
     g.edge:SetVertexColor(wr + (1 - wr) * ew, wg + (1 - wg) * ew, wb + (1 - wb) * ew, G.edgeAlpha)
+    -- Puls-Untergrenze (nur bei Aenderung; laeuft der Puls, kurz anhalten - waehrend Play nicht setzbar)
+    if g.pulse and g.pulseFrom ~= G.pulseFrom then
+        g.pulseFrom = G.pulseFrom
+        pcall(function()
+            local playing = g.anim ~= nil and g.anim:IsPlaying()
+            if playing then g.anim:Stop() end
+            g.pulse:SetFromAlpha(G.pulseFrom)
+            if playing then g.anim:Play() end
+        end)
+    end
+    -- Schimmer an der Vorderkante: erst bei s > 1 angelegt, sonst (falls schon da) unsichtbar
+    if G.shineA > 0 and not g.shine then
+        g.shine = free(g.inner:CreateTexture(nil, "BORDER", nil, 3))
+        g.shine:SetTexture(Liquid.FADEIN_TEX, "CLAMP", "CLAMP")
+        if g.shine.SetBlendMode then g.shine:SetBlendMode("ADD") end
+        addMask(g.shine, g.mask)
+        if lb.h then Liquid.LayoutHealGhost(lb) end
+    end
+    if g.shine then
+        g.shine:SetVertexColor(1, 1, 1, G.shineA)
+        if G.shineA > 0 then g.shine:Show() else g.shine:Hide() end
+    end
+end
+
+--- Staerke der Heil-Vorschau (Liquid.GHOST_STRENGTH, 1 = Standard); gilt auch fuer einen spaeter angelegten Geist
+function Liquid.SetGhostStrength(lb, s)
+    local S = Liquid.GHOST_STRENGTH
+    s = tonumber(s) or S.default
+    if s ~= s then s = S.default end
+    s = math.max(S.min, math.min(S.max, s))
+    if lb.ghostStrength == s then return end
+    lb.ghostStrength = s
+    if lb.ghost then
+        Liquid.TintHealGhost(lb)
+        if lb.h then Liquid.LayoutHealGhost(lb) end
+    end
 end
 
 --- Heil-Vorschau zeigen bis zum rechten Rand von region (Blizzards Vorschau-Maske) bzw. verbergen (region = nil)

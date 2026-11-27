@@ -34,7 +34,7 @@ end
 Config.RegisterPage("liquid", {
     label = "UI_TAB_LIQUID",
     order = 20,
-    height = 356,
+    height = 382,
     build = function(page)
         page.scope = W.FrameScope(page, "liquid", function() Config.Refresh() end)
 
@@ -59,26 +59,35 @@ Config.RegisterPage("liquid", {
         -- Regeneration deutlich zeigen: eine Einstellung fuer alle (wirkt nur an der eigenen Mana-Roehre)
         page.regenPulse = W.CheckAt(page, L.UI_LIQUID_REGEN, L.UI_LIQUID_REGEN_TIP, 394, -148,
             function(v) setGlobal(page, "regenPulse", v) end)
+        -- Hotfix 1.1.3, ebenfalls fuer alle: Countdown bis zur Regeneration (Sekunden nur mit Countdown bedienbar) und die
+        -- Staerke der Heil-Vorschau (50-200 %, Kerbe am Standard 100 % = bisherige Optik)
+        page.regenCountdown = W.CheckAt(page, L.UI_LIQUID_COUNTDOWN, L.UI_LIQUID_COUNTDOWN_TIP, 394, -174,
+            function(v) setGlobal(page, "regenCountdown", v) end)
+        page.regenSeconds = W.CheckAt(page, L.UI_LIQUID_SECONDS, L.UI_LIQUID_SECONDS_TIP, 570, -174,
+            function(v) setGlobal(page, "regenSeconds", v) end)
+        page.healStrength = W.SliderAt(page, L.UI_LIQUID_HEAL_STRENGTH, L.UI_LIQUID_HEAL_STRENGTH_TIP, 4, -148, 50, 200, 10,
+            pctFmt, function(v) setGlobal(page, "healStrength", v / 100) end)
 
         local h2 = W.Header(page, L.UI_LIQUID_HEAD_SLOSH, 740)
-        h2:SetPoint("TOPLEFT", 0, -188)
-        page.sloshNote = W.Note(page, 4, -212, 736, "GameFontNormalSmall", C.warn)
-        page.slosh = W.CheckAt(page, L.UI_FRAMES_SLOSH, L.UI_FRAMES_SLOSH_TIP, 0, -238,
+        h2:SetPoint("TOPLEFT", 0, -214)
+        page.sloshNote = W.Note(page, 4, -238, 736, "GameFontNormalSmall", C.warn)
+        page.slosh = W.CheckAt(page, L.UI_FRAMES_SLOSH, L.UI_FRAMES_SLOSH_TIP, 0, -264,
             function(v) setGlobal(page, "slosh", v) end)
-        page.strength = W.SliderAt(page, L.UI_FRAMES_STRENGTH, L.UI_FRAMES_STRENGTH_TIP, 4, -268, 0, 100, 5, pctFmt,
+        page.strength = W.SliderAt(page, L.UI_FRAMES_STRENGTH, L.UI_FRAMES_STRENGTH_TIP, 4, -294, 0, 100, 5, pctFmt,
             function(v) setGlobal(page, "sloshStrength", v / 100) end)
-        page.damping = W.SliderAt(page, L.UI_FRAMES_DAMPING, L.UI_FRAMES_DAMPING_TIP, 394, -268, 0, 100, 5, pctFmt,
+        page.damping = W.SliderAt(page, L.UI_FRAMES_DAMPING, L.UI_FRAMES_DAMPING_TIP, 394, -294, 0, 100, 5, pctFmt,
             function(v) setGlobal(page, "sloshDamping", v / 100) end)
 
-        page.status = W.Note(page, 4, -326, 736, "GameFontNormalSmall", C.muted)
+        page.status = W.Note(page, 4, -352, 736, "GameFontNormalSmall", C.muted)
 
         -- Standardwerte aus den Schema-Defaults (je Rahmen starten Eigenwerte mit denselben Werten; Schwappen gilt global)
         page.style:SetDefault("liquid.style")
-        for _, key in ipairs({ "smooth", "trail", "fx", "debuffs", "slosh", "regenPulse" }) do
+        for _, key in ipairs({ "smooth", "trail", "fx", "debuffs", "slosh", "regenPulse", "regenCountdown", "regenSeconds" }) do
             page[key]:SetDefault("liquid." .. key)
         end
         page.strength:SetDefault("liquid.sloshStrength", pct100)
         page.damping:SetDefault("liquid.sloshDamping", pct100)
+        page.healStrength:SetDefault("liquid.healStrength", pct100)
     end,
     refresh = function(page)
         local scope = page.scope
@@ -98,6 +107,10 @@ Config.RegisterPage("liquid", {
         local g = Skin.GetConfig().liquid
         local all = frame == nil
         page.regenPulse:SetValue(g.regenPulse)
+        page.regenCountdown:SetValue(g.regenCountdown)
+        page.regenSeconds:SetValue(g.regenSeconds)
+        page.regenSeconds:SetActive(g.regenCountdown == true)
+        page.healStrength:SetValue(pct100(g.healStrength))
         page.slosh:SetValue(g.slosh)
         page.strength:SetValue(pct100(g.sloshStrength))
         page.damping:SetValue(pct100(g.sloshDamping))

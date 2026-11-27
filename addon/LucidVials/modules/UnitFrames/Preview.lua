@@ -24,10 +24,10 @@ ns.Preview = Preview
 Skin.Preview = Preview
 
 Preview.SIZE = { w = 260, h = 200 }
-Preview.TESTS = { "heal", "hit", "mana", "regen", "slosh", "shield", "poison", "curse", "disease", "magic", "combat", "death",
-    "low", "numbers", "all" }
+Preview.TESTS = { "heal", "hit", "mana", "regen", "countdown", "slosh", "shield", "poison", "curse", "disease", "magic",
+    "combat", "death", "low", "numbers", "all" }
 Preview.TESTS_BY_PAGE = { general = { "all" },
-    liquid = { "heal", "hit", "mana", "regen", "slosh", "shield", "poison", "curse", "disease", "magic" },
+    liquid = { "heal", "hit", "mana", "regen", "countdown", "slosh", "shield", "poison", "curse", "disease", "magic" },
     portrait = { "hit", "heal", "combat", "death", "low" }, text = { "numbers" }, font = { "numbers" } }
 Preview.FRAMES = { player = true, target = true }
 Preview.KINDS = { normal = true, elite = true, rare = true, rareelite = true, boss = true }
@@ -54,7 +54,9 @@ Preview.BLIZZ_TEXT_MAX = 20
 -- Blizzards Statustext-CVars (Text.BlizzardMode); Aenderung => Zahlen der Buehne neu
 Preview.STATUS_CVARS = { statustextdisplay = true, statustext = true, statustextpercentage = true }
 -- Tests: Dauer (s), niedriges Leben, Zahlenfolge (je Schritt health/power/xp), Schwappen (Schwingung), Ablauf von "all"
-Preview.SECS = { debuff = 6, shield = 6, combat = 3, death = 3, low = 3.5 }
+Preview.SECS = { debuff = 6, shield = 6, heal = 4, combat = 3, death = 3, low = 3.5 }
+-- Heil-Test: Heil-Vorschau ab dem Fuellungsende ueber diesen Anteil der Roehrenlaenge (Hotfix 1.1.3, zeigt die Staerke)
+Preview.HEAL_GHOST = 0.22
 Preview.LOW = 0.12
 Preview.NUMBERS = { step = 0.7, seq = { { 1, 1, 0.95 }, { 0.61, 0.35, 0.62 }, { 0.33, 0.8, 0.2 }, { 0.08, 0.1, 0.05 },
     { 0.47, 0.6, 0.78 } } }
@@ -124,6 +126,8 @@ local function buildSk(core, id)
     sk.text = { entries = {}, hidden = { health = {}, power = {} }, values = { health = { 0, 1 }, power = { 0, 1 } } }
     -- Schild-Test: Ersatz fuer Blizzards Segment-Maske, ab dem Fuellungsende ueber einen Teil des leeren Glases
     sk.shieldRegion = CreateFrame("Frame", nil, sk.health.root)
+    -- Heil-Test: Ersatz fuer Blizzards Vorschau-Maske (rechtes Ende der Heil-Vorschau)
+    sk.ghostRegion = CreateFrame("Frame", nil, sk.health.root)
     root:Hide()
     return sk
 end
@@ -311,7 +315,11 @@ local function applySk(core, sk)
     -- wie am echten Rahmen: Schlieren und Ressourcen-Effekte nur beim Spieler
     Liquid.SetFx(sk.health, "preview-health", lq.fx, lq.debuffs and player or false)
     Liquid.SetFx(sk.power, "preview-power", lq.fx and player, false)
-    if ns.LiquidFizz then ns.LiquidFizz.SetPulse(sk.power, player and lq.regenPulse == true) end
+    if ns.LiquidFizz then
+        ns.LiquidFizz.SetPulse(sk.power, player and lq.regenPulse == true)
+        ns.LiquidFizz.SetCountdown(sk.power, player and lq.regenCountdown == true, lq.regenSeconds ~= false)
+    end
+    Liquid.SetGhostStrength(sk.health, lq.healStrength)
     Liquid.SetTint(sk.health, player and Skin.TINTS.player or Skin.TINTS.hostile)
     Liquid.SetTint(sk.power, Skin.PowerTint({ id = "player" }))
     sk.holder:Show()
@@ -338,6 +346,8 @@ local function removeSk(core, sk)
     if Skin.Portrait then safe(Skin.Portrait.Detach, sk) end
     if Skin.Text then safe(Skin.Text.Detach, sk) end
     if Skin.Deco then safe(Skin.Deco.Remove, sk) end
+    Liquid.SetHealGhost(sk.health, nil)
+    if ns.LiquidFizz then ns.LiquidFizz.SetCountdown(sk.power, false) end
     for _, lb in ipairs({ sk.health, sk.power }) do
         Liquid.SetSegment(lb, "shield", nil)
         Liquid.SetFx(lb, nil, false, false)
@@ -469,12 +479,30 @@ local function testNumbers(core)
     return true
 end
 
+--- Heil-Vorschau (Geist) ab dem Fuellungsende fuer SECS.heal s, in der eingestellten Staerke
+local function testHealGhost(core)
+    local sk = core.cur
+    local lb = sk.health
+    Liquid.AddHealGhost(lb)
+    local r = sk.ghostRegion
+    r:ClearAllPoints()
+    r:SetPoint("LEFT", lb.barTex or lb.root, "RIGHT", 0, 0)
+    r:SetSize(math.max(4, (lb.w or 100) * Preview.HEAL_GHOST), 1)
+    Liquid.SetHealGhost(lb, r)
+    core.ghostToken = (core.ghostToken or 0) + 1
+    local token = core.ghostToken
+    later(core, Preview.SECS.heal, function()
+        if core.ghostToken == token then Liquid.SetHealGhost(lb, nil) end
+    end)
+    return true
+end
+
 local TEST = {}
 function TEST.heal(core)
     local Fx, sk = ns.LiquidFx, core.cur
-    local any = Fx and Fx.TestTube(sk.health, "heal", true) or false
+    if Fx then Fx.TestTube(sk.health, "heal", true) end
     styleCall(sk, "React", "heal", false)
-    return any or sk.pfx ~= nil
+    return testHealGhost(core)
 end
 function TEST.hit(core)
     local Fx, sk = ns.LiquidFx, core.cur
@@ -491,6 +519,11 @@ end
 function TEST.regen(core)
     local Fizz = ns.LiquidFizz
     return Fizz ~= nil and Fizz.TestPulse(core.cur.power) or false
+end
+--- Countdown bis zur Regeneration (Option liquid.regenCountdown; aus => nichts), danach ggf. der Impuls
+function TEST.countdown(core)
+    local Fizz = ns.LiquidFizz
+    return Fizz ~= nil and Fizz.TestCountdown(core.cur.power) or false
 end
 TEST.slosh = testSlosh
 TEST.shield = testShield

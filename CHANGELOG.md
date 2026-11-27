@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.3
+
+- New option "Countdown to regeneration" on the Liquid tab (off by default): after each spell a small ring next to your mana tube fills up over the five seconds until mana regeneration resumes, optionally with the seconds shown.
+- New slider "Heal preview strength" on the Liquid tab: higher values make the incoming heal preview brighter, with a soft shimmer at its edge; 100 % keeps the current look.
+- The preview's "Heal" button now also shows the heal preview, and a new "Countdown" button plays the ring.
+- With PvP enabled, Blizzard's large faction flag no longer covers the portrait ring and tubes; a small faction crest now sits neatly on the ring instead.
+
 ## 1.1.2
 
 - Hidden Blizzard buff and debuff buttons under the target frame no longer catch the mouse, so tooltips match the icons you see.

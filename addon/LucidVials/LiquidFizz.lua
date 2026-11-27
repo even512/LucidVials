@@ -35,6 +35,14 @@
 --   (decide): nach einem eigenen Zauber (state.lockSeen) und Mana wechselt der Grund auf aktiv bzw. aktiv(tick). Lesbar:
 --   Anstieg verglichen; secret (Kampf, Forever auch draussen): nur der Ereignis-Takt - kein Secret wird verglichen.
 --   Mini-Vorschau: Fizz.TestPulse (eigene Roehre, nur mit eingeschalteter Option).
+-- Countdown bis zur Regeneration (Option liquid.regenCountdown, Standard aus; Hotfix 1.1.3): nach jedem eigenen erfolgreichen
+--   Zauber (UNIT_SPELLCAST_SUCCEEDED "player", derselbe Zeitpunkt wie die 5-s-Sperre, nur bei Mana) laeuft rechts neben dem Ende
+--   der eigenen Mana-Roehre ein kleiner Ring (Bronze-Fassung uf-ziel-aura, Glasgrund) in CFG.castLock s voll, optional mit
+--   Sekundenzahl (liquid.regenSeconds). Gerechnet wird nur mit eigenen GetTime-Zeitpunkten - kein Secret wird gelesen. Fuellung:
+--   Cooldown-Frame (Swipe mit runder Maske, rueckwaerts = waechst); fehlt er, waechst die Deckkraft einer Scheibe. Lesbar und voll
+--   (z. B. Zauber ohne Kosten): Ring unsichtbar. Bei 0 verschwindet er; ist der Impuls an, kommt er lesbar sofort (nicht voll),
+--   secret mit dem ersten Takt der Regeneration (wie bisher). Unabhaengig vom Effekte-Schalter (eigener OnUpdate nur solange er
+--   laeuft). Mini-Vorschau: Fizz.TestCountdown (eigene Roehre, danach ggf. der Impuls).
 local ADDON_NAME, ns = ...
 local Compat = ns.Compat
 
@@ -53,6 +61,12 @@ Fizz.TOKENS = { MANA = true, FOCUS = true, ENERGY = true }
 Fizz.PULSE_TEX = MEDIA .. "uf-fx-burst"
 -- Impuls: Dauer (s), Halo-Groesse (x Hoehe, von..bis), Kern-Groesse (x Hoehe), Deckkraft, Funken im Stoss, Wellen-Staerke
 Fizz.PULSE = { secs = 0.9, haloFrom = 1.6, haloTo = 4.2, core = 1.4, alpha = 1.0, coreA = 0.9, sparks = 8, kick = 0.45 }
+-- Countdown-Ring: Fassung (Bronze) und runde Maske (Swipe/Glasgrund)
+Fizz.COUNTDOWN_TEX = { ring = MEDIA .. "uf-ziel-aura", disc = "Interface\\CharacterFrame\\TempPortraitAlphaMask" }
+-- Groesse (x Roehrenhoehe, mindestens minPx), Abstand zum Roehrenende (px), Innenflaeche (Anteil der Groesse), Glasgrund
+-- (Farbe, Deckkraft), Fuellung (Aufhellung der Ressourcenfarbe, Deckkraft), Schrift (x Groesse, mindestens px)
+Fizz.COUNTDOWN = { size = 2.2, minPx = 16, gap = 3, inner = 0.74, back = { 0.03, 0.04, 0.07 }, backA = 0.7, bright = 0.25,
+    fillA = 0.95, font = 0.55, fontMin = 7 }
 -- hold: an nach dem letzten Anstieg (s); fadeIn/fadeOut (1/s); bright: Aufhellung der Ressourcenfarbe;
 -- Blasen: Pool, Abstand (s), Groesse px (min..max), Steigzeit (s), Wackeln (px, Hz), Platzdauer (s), Alpha;
 -- Funken: Pool, Abstand (s), Groesse px, Anfangs-Fall (x Hoehe/s), Schwerkraft (x Hoehe/s^2), seitlich (x Hoehe/s), Leben (s);
@@ -72,6 +86,7 @@ local notFullCurve
 local listening, evFrame = false, nil
 local update -- unten (Ereignis-Auswertung)
 local stepPulse -- unten (Bild des Regenerations-Impulses)
+local startCountdown, stopCountdown -- unten (Countdown bis zur Regeneration)
 
 local function now() return type(GetTime) == "function" and GetTime() or 0 end
 
@@ -150,6 +165,21 @@ function Fizz.SetPulse(lb, on)
     end
 end
 
+--- Option "Countdown bis zur Regeneration" je Roehre (Skin.lua/Preview.lua: nur die Ressourcenroehre des Spielers);
+--- seconds = Sekundenzahl im Ring
+function Fizz.SetCountdown(lb, on, seconds)
+    local fz = lb and lb.fx and lb.fx.fizz
+    if not fz then return end
+    fz.cdOn = on == true
+    fz.cdSecs = seconds ~= false
+    if fz.cd and fz.cd.num then
+        if fz.cdSecs and fz.cdUntil then fz.cd.num:Show() else fz.cd.num:Hide() end
+    end
+    if not fz.cdOn then stopCountdown(lb, fz) end
+    Fizz.UpdateListening()
+    if fz.cdOn and not fz.own then pcall(update) end
+end
+
 --- an/aus (Rolle "player-power" bzw. "preview-power" und Effekte an). own = Roehre der Mini-Vorschau (Preview.lua): sprudelt
 --- nur im eigenen Test (Fizz.TestTube), echte Ressourcen-Ereignisse und /vials test mana erreichen sie nie
 function Fizz.Configure(lb, on, own)
@@ -173,6 +203,12 @@ function Fizz.SetLevel(lb, level)
     fz.sOuter:SetFrameLevel(level + 3) -- ueber Glas und Rahmen (lb.top = Grund + 3)
     fz.sInner:SetFrameLevel(level + 3)
     if fz.pFrame then fz.pFrame:SetFrameLevel(level + 3) end
+    fz.level = level
+    if fz.cd then
+        fz.cd.frame:SetFrameLevel(level + 3)
+        if fz.cd.swipe then pcall(fz.cd.swipe.SetFrameLevel, fz.cd.swipe, level + 4) end
+        fz.cd.top:SetFrameLevel(level + 5)
+    end
 end
 
 function Fizz.Layout(lb)
@@ -188,6 +224,7 @@ function Fizz.Layout(lb)
         fz.mask:SetAllPoints(root)
     end
     fz.tint = nil
+    if fz.cd then Fizz.LayoutCountdown(lb) end
 end
 
 -- Erkennung ------------------------------------------------------------------------------------------------------------------
@@ -250,6 +287,12 @@ end
 function update()
     local ptype, regen, mana = powerType()
     state.regen, state.mana = regen, mana
+    if not mana then -- Formwechsel weg vom Mana: kein Countdown
+        for lb in pairs(tubes) do
+            local fz = lb.fx and lb.fx.fizz
+            if fz and fz.cdUntil and not fz.own then stopCountdown(lb, fz) end
+        end
+    end
     local okC, cur = pcall(UnitPower, "player")
     local okM, mx = pcall(UnitPowerMax, "player")
     local c, m = okC and Compat.Num(cur) or nil, okM and Compat.Num(mx) or nil
@@ -281,6 +324,12 @@ local function onEvent(_, event, unit, token)
         state.castAt = now() -- 5-Sekunden-Regel (nur der Zeitpunkt)
         state.last = nil
         state.lockSeen = true -- Impuls, sobald danach die Regeneration einsetzt
+        if state.mana then
+            for lb in pairs(tubes) do
+                local fz = lb.fx and lb.fx.fizz
+                if fz and fz.cdOn and not fz.own then startCountdown(lb, fz, state.castAt) end
+            end
+        end
         return
     end
     if event == "UNIT_POWER_FREQUENT" or event == "UNIT_POWER_UPDATE" then
@@ -314,7 +363,7 @@ function Fizz.UpdateListening()
     local want = false
     for lb in pairs(tubes) do
         local fz = lb.fx and lb.fx.fizz
-        if fz and fz.on and not fz.own then want = true end
+        if fz and (fz.on or fz.cdOn) and not fz.own then want = true end
     end
     if want == listening then return end
     listening = want
@@ -364,6 +413,14 @@ function Fizz.TestTube(lb)
     return true
 end
 
+--- Mini-Vorschau: Countdown an der eigenen Roehre (nur mit eingeschalteter Option); danach, falls an, der Impuls. Liefert true,
+--- wenn er laeuft.
+function Fizz.TestCountdown(lb)
+    local fz = lb and lb.fx and lb.fx.fizz
+    if not (fz and fz.own and fz.cdOn) then return false end
+    return startCountdown(lb, fz, now())
+end
+
 --- Mini-Vorschau: Regenerations-Impuls an der eigenen Roehre (nur mit Effekten und eingeschalteter Option). Liefert true,
 --- wenn er laeuft.
 function Fizz.TestPulse(lb)
@@ -376,6 +433,173 @@ function Fizz.TestPulse(lb)
     lb.fx.busy = true
     if ns.Liquid.Wake then ns.Liquid.Wake() end
     return true
+end
+
+-- Countdown bis zur Regeneration ----------------------------------------------------------------------------------------------
+local function call(obj, m, ...)
+    local fn = obj and obj[m]
+    if type(fn) ~= "function" then return false end
+    return (pcall(fn, obj, ...))
+end
+
+--- Ring anlegen (erst beim ersten Start): Glasgrund, Fuellung (Cooldown-Swipe bzw. Scheibe), Fassung und Zahl darueber
+local function buildCountdown(lb, fz)
+    local T, K = Fizz.COUNTDOWN_TEX, Fizz.COUNTDOWN
+    local f = CreateFrame("Frame", nil, lb.root)
+    local cd = { frame = f }
+    cd.back = free(f:CreateTexture(nil, "BACKGROUND"))
+    cd.back:SetTexture(T.disc)
+    cd.back:SetVertexColor(K.back[1], K.back[2], K.back[3], K.backA)
+    local okC, sw = pcall(CreateFrame, "Cooldown", nil, f)
+    if okC and type(sw) == "table" and type(sw.SetCooldown) == "function" then
+        cd.swipe = sw
+        call(sw, "SetSwipeTexture", T.disc)
+        call(sw, "SetUseCircularEdge", true)
+        call(sw, "SetDrawEdge", false)
+        call(sw, "SetDrawBling", false)
+        call(sw, "SetHideCountdownNumbers", true)
+        call(sw, "SetReverse", true) -- der Swipe deckt den abgelaufenen Teil: der Ring laeuft voll
+        cd.state = "swipe"
+    else
+        if okC and type(sw) == "table" and type(sw.Hide) == "function" then pcall(sw.Hide, sw) end
+        cd.disc = free(f:CreateTexture(nil, "ARTWORK"))
+        cd.disc:SetTexture(T.disc)
+        cd.state = "scheibe"
+    end
+    cd.top = CreateFrame("Frame", nil, f)
+    cd.top:SetAllPoints(f)
+    cd.ring = free(cd.top:CreateTexture(nil, "OVERLAY", nil, 1))
+    cd.ring:SetTexture(T.ring)
+    cd.ring:SetAllPoints(cd.top)
+    cd.num = cd.top:CreateFontString(nil, "OVERLAY")
+    cd.num:SetPoint("CENTER", cd.top, "CENTER", 0, 0)
+    cd.num:Hide()
+    f:Hide()
+    f:SetScript("OnUpdate", function() Fizz.StepCountdown(lb) end)
+    fz.cd = cd
+    if fz.level then Fizz.SetLevel(lb, fz.level) end
+    Fizz.LayoutCountdown(lb)
+    return cd
+end
+
+--- Lage und Groesse: rechts neben dem Roehrenende (Kapselrahmen bzw. Wurzel), senkrecht mittig
+function Fizz.LayoutCountdown(lb)
+    local fz = lb.fx.fizz
+    local cd, K = fz.cd, Fizz.COUNTDOWN
+    if not cd then return end
+    local size = math.max(K.minPx, math.floor((lb.h or 10) * K.size + 0.5))
+    local anchor = lb.right or lb.root
+    cd.frame:ClearAllPoints()
+    cd.frame:SetPoint("LEFT", anchor, "RIGHT", K.gap, 0)
+    cd.frame:SetSize(size, size)
+    local inner = size * K.inner
+    for _, t in ipairs({ cd.back, cd.swipe, cd.disc }) do
+        if t then
+            t:ClearAllPoints()
+            t:SetPoint("CENTER", cd.frame, "CENTER", 0, 0)
+            t:SetSize(inner, inner)
+        end
+    end
+    local fs = math.max(K.fontMin, math.floor(size * K.font + 0.5))
+    if cd.fontSize ~= fs then
+        cd.fontSize = fs
+        local ok, used = false, false
+        if ns.Fonts and ns.Fonts.ApplyDefault then ok, used = pcall(ns.Fonts.ApplyDefault, cd.num, fs) end
+        if not (ok and used) then
+            call(cd.num, "SetFontObject", "GameFontHighlightSmall")
+            call(cd.num, "SetFont", STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", fs, "OUTLINE")
+        end
+    end
+    fz.cdTint = nil
+end
+
+--- Fuellfarbe: Ressourcenfarbe, aufgehellt (nur bei Farbwechsel)
+local function tintCountdown(lb, fz)
+    if fz.cdTint == lb.tint then return end
+    fz.cdTint = lb.tint
+    local cd, K = fz.cd, Fizz.COUNTDOWN
+    local c, k = lb.tint or WHITE, K.bright
+    local r, g, b = c[1] + (1 - c[1]) * k, c[2] + (1 - c[2]) * k, c[3] + (1 - c[3]) * k
+    if cd.swipe then call(cd.swipe, "SetSwipeColor", r, g, b, K.fillA) end
+    if cd.disc then cd.disc:SetVertexColor(r, g, b) end
+end
+
+--- Countdown starten bzw. neu starten (t0 = eigener Zeitpunkt); liefert true, wenn er laeuft
+function startCountdown(lb, fz, t0)
+    if not (fz.cdOn and lb.root and t0) then return false end
+    local cd = fz.cd or buildCountdown(lb, fz)
+    local secs = Fizz.CFG.castLock
+    fz.cdStart, fz.cdUntil, fz.cdShown, fz.cdHidden = t0, t0 + secs, nil, nil
+    tintCountdown(lb, fz)
+    if cd.swipe then
+        call(cd.swipe, "SetCooldown", t0, secs)
+        call(cd.swipe, "Show")
+    end
+    if fz.cdSecs then cd.num:Show() else cd.num:Hide() end
+    cd.frame:SetAlpha(1)
+    cd.frame:Show()
+    Fizz.StepCountdown(lb)
+    return fz.cdUntil ~= nil
+end
+
+function stopCountdown(_, fz)
+    fz.cdStart, fz.cdUntil, fz.cdShown, fz.cdHidden = nil, nil, nil, nil
+    if fz.cd then
+        if fz.cd.swipe then call(fz.cd.swipe, "Clear") end
+        fz.cd.num:Hide()
+        fz.cd.frame:Hide()
+    end
+end
+
+--- Impuls bei 0: Vorschau immer (falls an); echt nur lesbar und nicht voll - secret bleibt es beim ersten Takt (decide)
+local function countdownDone(lb, fz)
+    if not (fz.on and fz.pulseOn) then return end
+    if fz.own then
+        Fizz.TestPulse(lb)
+        return
+    end
+    if state.mode == "num" and state.lockSeen and state.cur and state.max and state.cur < state.max then
+        state.lockSeen = false
+        fz.pulseAt = -1
+        state.pulses = (state.pulses or 0) + 1
+        lb.fx.busy = true
+        if ns.Liquid.Wake then ns.Liquid.Wake() end
+    end
+end
+
+--- Ein Bild des Rings (OnUpdate, nur solange er laeuft): Zahl, Rueckfall-Fuellung, Ende
+function Fizz.StepCountdown(lb)
+    local fz = lb.fx and lb.fx.fizz
+    if not (fz and fz.cd and fz.cdUntil) then return end
+    local cd, t = fz.cd, now()
+    local left = fz.cdUntil - t
+    if left <= 0 then
+        stopCountdown(lb, fz)
+        countdownDone(lb, fz)
+        return
+    end
+    tintCountdown(lb, fz)
+    -- lesbar und voll (Zauber ohne Kosten): nichts zu zaehlen, Ring unsichtbar
+    local full = (not fz.own and state.mode == "num" and state.cur and state.max and state.cur >= state.max) == true
+    if fz.cdHidden ~= full then
+        fz.cdHidden = full
+        cd.frame:SetAlpha(full and 0 or 1)
+    end
+    if cd.disc then cd.disc:SetAlpha(Fizz.COUNTDOWN.fillA * math.min(1, (t - fz.cdStart) / Fizz.CFG.castLock)) end
+    local n = math.ceil(left - 1e-6)
+    if fz.cdShown ~= n then
+        fz.cdShown = n
+        cd.num:SetText(tostring(n))
+    end
+end
+
+--- Zustand fuer /vials debug: "aus" | "an" | Rest in s, dazu der Fuellweg (swipe | scheibe | -)
+function Fizz.CountdownInfo(lb)
+    local fz = lb and lb.fx and lb.fx.fizz
+    local how = fz and fz.cd and fz.cd.state or "-"
+    if not (fz and fz.cdOn) then return "aus", how end
+    if fz.cdUntil then return string.format("%.1fs", math.max(0, fz.cdUntil - now())), how end
+    return "an", how
 end
 
 -- Bild ------------------------------------------------------------------------------------------------------------------------

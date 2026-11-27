@@ -27,6 +27,13 @@
 --     eigener Maus-Schild (DisableUntrustedLayoutScriptsTemplate, sonst ist das Anheften an den sich selbst bemessenden
 --     Container verboten) deckungsgleich ueber Blizzards Container, und der eigene Container liegt eine Ebene darueber.
 --     Blizzards Container wird nicht angefasst (nur gelesen: Ebene; angeheftet wird nur der eigene Schild).
+--   * PvP-Abzeichen (Spieler und Ziel, Hotfix 1.1.3): Blizzards grosse Fraktions-Flagge (PVPIcon bzw. PvpIcon) samt
+--     Prestige-Portrait/-Abzeichen ragte ueber Ring und Roehren. Diese Teile per SetAlpha(0), statt dessen eine kleine
+--     Fassung (wie das Quest-Symbol) mit dem Fraktions-Wappen angeschmiegt aussen auf dem Ringband (Spieler oben links, Ziel
+--     gespiegelt oben rechts). Gezeigt wie bei Blizzard: frei fuer alle (UnitIsPVPFreeForAll) => FFA, sonst UnitIsPVP und
+--     Horde/Allianz (UnitFactionGroup). Secret oder unlesbar => Blizzards Symbol bleibt sichtbar, kein eigenes. Atlas
+--     (UI-HUD-UnitFrame-Player-PVP-*), fehlt er: klassische Datei (Interface\TargetingFrame\UI-PVP-*). Neu bei Zielwechsel,
+--     UNIT_FACTION und PLAYER_FLAGS_CHANGED. Mini-Vorschau: Spieler-Buehne mit dem Stand des Spielers, Ziel-Buehne ohne.
 -- /vials test ziel <art> zeigt die Zier ohne passendes Ziel (am Ziel bzw. an einem eigenen Testrahmen).
 -- Mini-Vorschau (Preview.lua, sk.preview): Ziel-Art je Instanz (sk.previewKind statt des modulglobalen S.test), ohne Auren,
 -- Raidmarker und Quest-Symbol, Stufe aus sk.previewLevel; echte Ziele und Questie bleiben unberuehrt.
@@ -77,6 +84,16 @@ Deco.AURA = { refSize = 18, gap = 2, rowGap = 3, top = 3, iconFill = 1.04, perRo
 -- ohne lesbare Ebene des Blizzard-Containers: Wurzel + levelFallback
 Deco.AURA_LEVEL = { shieldLift = 4, ownLift = 2, levelFallback = 12 }
 Deco.SHIELD_TEMPLATE = "DisableUntrustedLayoutScriptsTemplate"
+-- PvP-Abzeichen: Blizzard-Teile (parentKeys beider Rahmen; fehlende sind kein Befund), Lage (Grad gegen den Uhrzeigersinn ab
+-- rechts, ungespiegelt; das Ziel spiegelt), Fassung (x Ringgroesse) und Wappen (x Fassung), Wappen je Fraktion
+Deco.PVP_KEYS = { "PVPIcon", "PvpIcon", "PrestigePortrait", "PrestigeBadge" }
+Deco.PVP = { angle = 148, sock = 0.27, icon = 0.82 }
+Deco.PVP_ATLAS = { Horde = "UI-HUD-UnitFrame-Player-PVP-HordeIcon", Alliance = "UI-HUD-UnitFrame-Player-PVP-AllianceIcon",
+    FFA = "UI-HUD-UnitFrame-Player-PVP-FFAIcon" }
+Deco.PVP_FILE = { Horde = "Interface\\TargetingFrame\\UI-PVP-Horde", Alliance = "Interface\\TargetingFrame\\UI-PVP-Alliance",
+    FFA = "Interface\\TargetingFrame\\UI-PVP-FFA" }
+Deco.PVP_FILE_COORD = { 0.05, 0.62, 0.02, 0.62 } -- klassische 64er-Dateien: Wappen oben links
+Deco.PVP_UNIT = { player = "player", target = "target" }
 -- Ring mit Rohraufnahmen (uf-ring-aufnahme, 512 x 512; Lage in GEO.socket aus scripts/gen-unitframe-media.mjs
 -- socketGeometry: Ringmitte cx/cy und Texturbreite size x Ring-Durchmesser; je Roehre Fenster-Innenkanten top/bot, Haarlinien
 -- rimTop/rimBot, Manschette cuff, Fensterbeginn win, Sockelbeginn sock, Roehrenende endX - Anteile des halben Ring-
@@ -482,9 +499,17 @@ local function buildTarget(sk)
     sk.skull = newTex(sk.deco, "OVERLAY", Style and Style.SKULL_TEX)
 end
 
+--- PvP-Abzeichen anlegen (Spieler und Ziel): kleine Fassung und Wappen ueber dem Ring
+local function buildPvp(sk)
+    if not (Deco.PVP_UNIT[sk.id] and sk.deco) then return end
+    sk.pvpSock = newTex(sk.deco, "ARTWORK", Deco.TEX.markerSmall, 1)
+    sk.pvpIcon = newTex(sk.deco, "OVERLAY", nil, 1)
+end
+
 function Deco.Build(sk)
     -- Ring mit Aufnahmen: im Ring-Frame neben uf-ring (gleiche Ebene ueber den Roehren, Zier-Hinterlage darunter)
     if Skin.SOCKET.ids[sk.id] then sk.socket = newTex(sk.ringFrame, "ARTWORK", Skin.SOCKET.path) end
+    buildPvp(sk)
     if sk.id ~= "target" then return end
     buildTarget(sk)
     if not sk.preview then buildAuras(sk) end -- Vorschau: keine Auren (der Container zeigte die des echten Ziels)
@@ -587,7 +612,19 @@ local function layoutAuras(sk)
     sk.auraPerRow = n
 end
 
+--- PvP-Abzeichen aussen auf dem Ringband (wie die Quest-Fassung), Ziel gespiegelt
+local function layoutPvp(sk)
+    if not (sk.pvpSock and sk.ring) then return end
+    local P, size = Deco.PVP, sk.ringSize or 72
+    local rm = size / 2 * (Deco.RING.inner + Deco.RING.outer) / 2
+    local mirrored = Skin.SPEC[sk.id] and Skin.SPEC[sk.id].mirrored
+    local a = mirrored and (180 - P.angle) or P.angle
+    polar(sk.pvpSock, sk.ring, a, rm, size * P.sock)
+    polar(sk.pvpIcon, sk.ring, a, rm, size * P.sock * P.icon)
+end
+
 function Deco.Layout(sk)
+    layoutPvp(sk)
     if sk.id == "target" and sk.zBack then layoutTarget(sk) end
     if sk.auras then safe(layoutAuras, sk) end
     sk.endsTries = 0
@@ -843,7 +880,88 @@ local function hookQuestieNameplate()
     S.questieNpHooked = ok
 end
 
+-- PvP-Abzeichen: Stand lesen und zeigen --------------------------------------------------------------------------------
+--- Stand der Einheit: "FFA" | "Horde" | "Alliance" | false (kein PvP) | nil (secret/unlesbar: Blizzard zeigt es)
+--- Spielregel "PvP-Kontext an Einheitenrahmen aus" (wie Blizzard UnitFrameUtil/TargetFrame): aktiv => kein Symbol
+local function pvpContextDisabled()
+    local gr, E = _G.C_GameRules, _G.Enum
+    local rule = type(E) == "table" and type(E.GameRule) == "table" and E.GameRule.UnitFramePvPContextualDisabled or nil
+    if rule == nil or type(gr) ~= "table" then return false end
+    return readFlag(gr.IsGameRuleActive, rule) == true
+end
+Deco.PvpContextDisabled = pvpContextDisabled
+
+function Deco.PvpState(unit)
+    if pvpContextDisabled() then return false end
+    local ffa = readFlag(_G.UnitIsPVPFreeForAll, unit)
+    if ffa == nil then return nil end
+    if ffa then return "FFA" end
+    local pvp = readFlag(_G.UnitIsPVP, unit)
+    if pvp == nil then return nil end
+    if not pvp then return false end
+    local fn = _G.UnitFactionGroup
+    if type(fn) ~= "function" then return nil end
+    local ok, tag = pcall(fn, unit)
+    if not ok or Compat.IsSecret(tag) or type(tag) ~= "string" then return nil end
+    if tag ~= "Horde" and tag ~= "Alliance" then return false end -- neutral (Pandaren ohne Fraktion): kein Symbol
+    -- Soeldner (Retail, nur der Spieler wie bei Blizzard): Wappen der anderen Seite
+    if unit == "player" and readFlag(_G.UnitIsMercenary, unit) == true then
+        tag = tag == "Horde" and "Alliance" or "Horde"
+    end
+    return tag
+end
+
+--- Wappen setzen: Atlas, sonst klassische Datei
+local function setPvpTex(tex, kind)
+    local atlas = Deco.PVP_ATLAS[kind]
+    local ct = _G.C_Texture
+    local info = ct and type(ct.GetAtlasInfo) == "function" and select(2, pcall(ct.GetAtlasInfo, atlas)) or nil
+    if type(info) == "table" and call(tex, "SetAtlas", atlas) then
+        call(tex, "SetTexCoord", 0, 1, 0, 1)
+        return "atlas"
+    end
+    tex:SetTexture(Deco.PVP_FILE[kind])
+    local c = Deco.PVP_FILE_COORD
+    call(tex, "SetTexCoord", c[1], c[2], c[3], c[4])
+    return "datei"
+end
+
+--- Abzeichen nach dem Stand der Einheit; Blizzards Teile nur verbergen, solange der Stand lesbar ist
+local function refreshPvp(sk)
+    if not sk.pvpSock then return end
+    local unit = Deco.PVP_UNIT[sk.id]
+    local state
+    if sk.preview then
+        state = sk.id == "player" and Deco.PvpState("player") or false
+    elseif not unitExists(unit) then
+        state = false
+    else
+        state = Deco.PvpState(unit)
+    end
+    sk.pvpState = state
+    local found = sk.found or {}
+    for _, k in ipairs(Deco.PVP_KEYS) do
+        local r = found[k]
+        if r then
+            if state == nil then Skin.ShowRegion(sk, r) else Skin.HideRegion(sk, r) end
+        end
+    end
+    if not state then
+        sk.pvpSock:Hide()
+        sk.pvpIcon:Hide()
+        return
+    end
+    if sk.pvpKind ~= state then
+        sk.pvpKind = state
+        sk.pvpTex = setPvpTex(sk.pvpIcon, state)
+    end
+    sk.pvpSock:Show()
+    sk.pvpIcon:Show()
+end
+Deco.RefreshPvp = function(sk) if sk and sk.applied then safe(refreshPvp, sk) end end
+
 function Deco.Refresh(sk)
+    safe(refreshPvp, sk)
     if sk.id ~= "target" or not sk.zBack then return end
     refreshTarget(sk)
     if sk.preview then
@@ -866,6 +984,9 @@ end
 
 --- Blizzards Auren nur verbergen, wenn der eigene Container laeuft (sonst bleiben sie sichtbar)
 function Deco.HideBlizzard(sk)
+    if sk.pvpSock and sk.pvpState ~= nil and sk.found then -- Blizzard kann sein Symbol neu gesetzt haben
+        for _, k in ipairs(Deco.PVP_KEYS) do Skin.HideRegion(sk, sk.found[k]) end
+    end
     if S.auraInitFail and sk.auras then auraFallback(sk) end -- spaet erzeugte Knoepfe ohne SetIcon
     if sk.auras and sk.found then Skin.HideRegion(sk, sk.found.Auras) end
     if sk.auras then showShield(sk, sk.found and sk.found.Auras ~= nil) end
@@ -878,6 +999,11 @@ function Deco.Remove(sk)
     end
     if sk.socket then showSocket(sk, false) end
     showShield(sk, false)
+    if sk.pvpSock then
+        sk.pvpSock:Hide()
+        sk.pvpIcon:Hide()
+        sk.pvpState, sk.pvpKind = nil, nil
+    end
 end
 
 -- Ereignisse --------------------------------------------------------------------------------------------------------------
@@ -912,6 +1038,15 @@ end
 for _, ev in ipairs({ "QUEST_LOG_UPDATE", "UNIT_QUEST_LOG_CHANGED", "QUEST_ACCEPTED", "QUEST_TURNED_IN", "QUEST_REMOVED" }) do
     Compat.TryOn(ev, function() Deco.OnQuest() end)
 end
+-- PvP-Abzeichen: Flaggen (PvP an/aus, FFA) und Fraktion; nur Spieler und Ziel
+local function onPvpEvent(_, unit)
+    if unit ~= nil and (type(unit) ~= "string" or Compat.IsSecret(unit)) then return end
+    for id in pairs(Deco.PVP_UNIT) do
+        if unit == nil or unit == Deco.PVP_UNIT[id] then Deco.RefreshPvp(Skin.Get(id)) end
+    end
+end
+Compat.TryOn("PLAYER_FLAGS_CHANGED", onPvpEvent)
+Compat.TryOn("UNIT_FACTION", onPvpEvent)
 Compat.TryOn("RAID_TARGET_UPDATE", function()
     local sk = targetSk()
     if sk then safe(refreshMarker, sk) end
@@ -1022,6 +1157,17 @@ function Deco.Debug()
         parts[#parts + 1] = string.format("%s=%s/%s%s", id, fmtEnd(e.health), fmtEnd(e.power), (s and s.endsOk) and "" or "?")
         if s and s.socket then sockets[#sockets + 1] = id .. ":" .. yn(s.socketOn) end
     end
+    local pvp = {}
+    for id in pairs(Deco.PVP_UNIT) do
+        local s = Skin.Get(id)
+        if s and s.pvpSock then
+            local st = s.pvpState
+            pvp[#pvp + 1] = string.format("%s:%s%s", id, st == nil and "blizzard" or (st or "-"),
+                st and ("/" .. tostring(s.pvpTex or "-")) or "")
+        end
+    end
+    table.sort(pvp)
+    ns.Print("frames.pvp %s", #pvp > 0 and table.concat(pvp, " ") or "-")
     ns.Print("frames.enden %s aufnahmen=%s errors=%d", table.concat(parts, " "),
         #sockets > 0 and table.concat(sockets, ",") or "-", S.errorCount)
     for i, e in ipairs(S.errors) do ns.Print("frames.ziel.error.%d %s", i, (e:gsub("|", "||"))) end
