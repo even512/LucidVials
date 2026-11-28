@@ -37,6 +37,15 @@
 -- Secret-Regel: Leben/Maximum gehen unveraendert (pcall) nur an StatusBar/SetAlpha, nie in Vergleiche, Rechnung, Schluessel,
 -- tostring/format (tests/unitframes-portrait.test.mjs prueft die Funktionen statisch). UNIT_COMBAT: nur das Ereignis (und, wenn
 -- lesbar, der Text); die Menge wird nie gelesen. Kein CLEU, keine Hooks auf Blizzard-Frames, nichts Geschuetztes.
+-- Blickrichtung (Hotfix 1.1.4, Felder mirrorPlayer/mirrorTarget im Bereich "portrait", global: gelten immer getrennt je Rahmen,
+-- unabhaengig vom Rahmen-Waehler; Standard false = wie bisher, nichts wird angefasst; ein frueheres gemeinsames Feld mirror wird
+-- beim Pruefen uebernommen, Portrait.Migrate). frameConfig(id) liefert daraus cfg.mirror des Rahmens. Gespiegelt
+-- tauschen alle Bild-Lagen links und rechts der TexCoords (P.mirror; texCoord/texCoord8/fullCoords unten): Gemaelde samt Zoom und
+-- Effekt-Lagen (Vignette, Kerzenlicht, Risse samt Schattenkopie, Blitze), versunkene Kopien samt Wabern (Neigungs-Versatz mit
+-- umgekehrtem Vorzeichen, damit er auf dem Bildschirm weiter der Physik folgt), die obere klare Kopie. Kreismaske, Glanz, Kaustik,
+-- Wasserlinie und Blasen bleiben (symmetrisch bzw. Licht/Fluessigkeit der Welt). "static" + gespiegelt laeuft als interner Stil
+-- "flat": eigenes rundes Bild (SetPortraitTexture in P.base, gespiegelt), Blizzards Portrait Alpha 0 (Blizzards Textur bekommt nie
+-- ein SetTexCoord); ohne Glanz, ohne Reaktionen, nicht im Testwort. Modelle: PortraitModel.lua (SetFacing).
 -- Texturen: Portrait.TEX (Platzhalter aus scripts/gen-portrait-placeholders.mjs, die Gemini-Bilder ersetzen die Dateien 1:1).
 local _, ns = ...
 local Compat, L = ns.Compat, ns.L
@@ -58,7 +67,8 @@ Portrait.WATERLINE = MEDIA .. "uf-portrait-waterline" -- 8 x 64, Lichtlinie bei 
 Portrait.BUBBLES = { path = MEDIA .. "uf-fx2-bubbles", n = 8, cells = { 1, 2, 3, 4, 5 } } -- wie LiquidFizz.TEX.bubble
 Portrait.UNIT = { player = "player", target = "target" }
 Portrait.STYLE_ORDER = { "static", "painting", "submerged", "model" }
-Portrait.DEFAULT = { style = "static", intensity = 0.6 }
+Portrait.DEFAULT = { style = "static", intensity = 0.6, mirrorPlayer = false, mirrorTarget = false }
+Portrait.MIRROR_FIELD = { player = "mirrorPlayer", target = "mirrorTarget" }
 Portrait.PAINT = { breathBase = 0.02, breathScale = 0.05, breathSecs = 4.4, calmSecs = 7, vignetteBase = 0.3, vignette = 1.0,
     candle = 0.85, flickerMin = 0.3, flickerSecs = { 0.25, 1.1 }, flickerRate = 7, flickerJitter = 0.04, calmLight = 0.6,
     flash = { hit = { 0.55, 0.1, 0.8 }, heal = { 0.7, 0.15, 1.1 } }, -- { Spitze, Anstieg s, Abklingen s } (Spitze x Staerke)
@@ -103,6 +113,38 @@ local function readFlag(fn, ...)
     if not ok or Compat.IsSecret(v) then return nil end
     return v
 end
+
+--- Blickrichtung: TexCoords (4-Wert-Form) mit getauschtem Links/Rechts, wenn der Rahmen gespiegelt ist
+local function texCoord(P, tex, u0, u1, v0, v1)
+    if P and P.mirror then return tex:SetTexCoord(u1, u0, v0, v1) end
+    return tex:SetTexCoord(u0, u1, v0, v1)
+end
+
+--- dasselbe fuer die 8-Wert-Form (Ecken oben links, unten links, oben rechts, unten rechts): linke und rechte Ecken tauschen
+local function texCoord8(P, tex, ulx, uly, llx, lly, urx, ury, lrx, lry)
+    if P and P.mirror then return tex:SetTexCoord(urx, ury, lrx, lry, ulx, uly, llx, lly) end
+    return tex:SetTexCoord(ulx, uly, llx, lly, urx, ury, lrx, lry)
+end
+
+--- ganze Textur gespiegelt bzw. zurueck; ungespiegelt und nie gespiegelt: kein Aufruf (Standard unveraendert)
+local mirroredTex = setmetatable({}, { __mode = "k" })
+local function fullCoords(P, tex)
+    if not tex then return end
+    if P and P.mirror then
+        tex:SetTexCoord(1, 0, 0, 1)
+        mirroredTex[tex] = true
+    elseif mirroredTex[tex] then
+        tex:SetTexCoord(0, 1, 0, 1)
+        mirroredTex[tex] = nil
+    end
+end
+
+local function fullCoordsAll(P, list)
+    for _, t in ipairs(list) do fullCoords(P, t) end
+end
+
+--- Textur ungespiegelt zuruecklassen (sie gehoert auch den anderen Stilen)
+local function unmirror(tex) fullCoords(nil, tex) end
 
 local function clamp01(x) return math.max(0, math.min(1, x)) end
 
@@ -364,7 +406,7 @@ local function stepPainting(P, s, t, dt)
     if math.abs(z - s.zoom) > 0.0002 then
         s.zoom = z
         local h = 0.5 / z
-        P.base:SetTexCoord(0.5 - h, 0.5 + h, 0.5 - h, 0.5 + h)
+        texCoord(P, P.base, 0.5 - h, 0.5 + h, 0.5 - h, 0.5 + h)
     end
     if t >= s.cNext then
         s.cTarget = C.flickerMin + (1 - C.flickerMin) * math.random()
@@ -448,6 +490,8 @@ function Painting.Activate(P, cfg)
     P.calm = not P.preview and P.unit == "player" and readFlag(IsResting) == true or false
     P.cfg = cfg
     s.cNext = 0
+    s.zoom, s.mirror = 0, P.mirror -- Blickrichtung kann gewechselt haben: der Treiber setzt den Zoom neu
+    fullCoordsAll(P, s.all)
     applyPainting(P, s)
     Painting.Layout(P)
     Painting.Refresh(P)
@@ -462,6 +506,7 @@ function Painting.Deactivate(P)
     for _, g in ipairs({ s.healFx.g, s.hitFx.g }) do call(g, "Stop") end
     for _, t in ipairs(s.all) do t:Hide() end
     P.base:SetTexCoord(0, 1, 0, 1) -- Zoom des Atmens zuruecknehmen (die Textur gehoert auch den anderen Stilen)
+    mirroredTex[P.base] = nil
     s.zoom = 1
     setDesaturated(P.base, false)
     P.testLow = nil
@@ -480,6 +525,11 @@ function Painting.Configure(P, cfg)
     local s = P.s.painting
     if not s then return end
     P.cfg = cfg
+    if s.mirror ~= P.mirror then -- Blickrichtung umgeschaltet: Effekt-Lagen spiegeln, der Treiber setzt den Zoom neu
+        s.mirror = P.mirror
+        fullCoordsAll(P, s.all)
+        s.zoom = 0
+    end
     if s.lastI ~= cfg.intensity then applyPainting(P, s) end
     updateLow(P)
 end
@@ -701,7 +751,7 @@ local function wave(amp, t, w, ph, k) return amp * math.sin(t * w + ph + k * 1.7
 
 local warp8 = true
 
-local function warp(tex, t, amp, g, shift)
+local function warp(P, tex, t, amp, g, shift)
     local S = Portrait.SUB
     local w, ph = g.speed, g.phase
     local h = 0.5 * g.zoom * (1 + g.breath * math.sin(t * w * 0.8 + ph + 0.9))
@@ -710,13 +760,13 @@ local function warp(tex, t, amp, g, shift)
     local u0, u1, v0, v1 = cx - h, cx + h, cy - h, cy + h
     if warp8 then
         local up, lo = amp * S.wUp, amp * S.wLow
-        local ok = pcall(tex.SetTexCoord, tex, u0 + wave(up, t, w, ph, 0), v0 + wave(up, t, w, ph, 1), u0 + wave(lo, t, w, ph, 2),
+        local ok = pcall(texCoord8, P, tex, u0 + wave(up, t, w, ph, 0), v0 + wave(up, t, w, ph, 1), u0 + wave(lo, t, w, ph, 2),
             v1 + wave(lo, t, w, ph, 3), u1 + wave(up, t, w, ph, 4), v0 + wave(up, t, w, ph, 5), u1 + wave(lo, t, w, ph, 6),
             v1 + wave(lo, t, w, ph, 7))
         if ok then return end
         warp8 = false
     end
-    tex:SetTexCoord(u0, u1, v0, v1)
+    texCoord(P, tex, u0, u1, v0, v1)
 end
 
 --- Wasserlinie neigen/wellen: je Haelfte ein 8-Wert-TexCoord, der den Verlauf senkrecht verschiebt (links dL, Mitte dM, rechts dR; + = Linie
@@ -771,10 +821,10 @@ function Portrait.Step(t)
             local stir = (1 + S.boostK * s.boost * s.boost) * (P.calm and S.calm or 1)
             local amp = math.min(S.waveCap, (S.wave + (S.waveMax - S.wave) * i) * stir)
             stats.amp = amp
-            local shift = tilt * S.tilt * i
+            local shift = tilt * S.tilt * i * (P.mirror and -1 or 1) -- gespiegelt: gleiche Richtung auf dem Bildschirm
             surfWave(s, t, tilt, i, P.calm and S.calm or 1)
-            warp(s.copies[1], t, math.min(S.mainCap, S.mainWave * (0.5 + 0.5 * i) * stir), S.main, 0)
-            for k, g in ipairs(S.ghost) do warp(s.copies[k + 1], t, amp, g, shift * (k == 1 and 1 or -0.7)) end
+            warp(P, s.copies[1], t, math.min(S.mainCap, S.mainWave * (0.5 + 0.5 * i) * stir), S.main, 0)
+            for k, g in ipairs(S.ghost) do warp(P, s.copies[k + 1], t, amp, g, shift * (k == 1 and 1 or -0.7)) end
             for k, tex in ipairs(s.caustics) do
                 local c = S.causticMove[k]
                 local u, v = (t * c[1]) % 1, (t * c[2]) % 1
@@ -818,6 +868,7 @@ function Submerged.Deactivate(P)
     s.clip:Hide()
     s.bar:Hide()
     setDesaturated(P.base, false)
+    unmirror(P.base)
     P.testLow = nil
     s.lastI = nil -- naechstes Configure startet die Blasen neu
 end
@@ -837,6 +888,7 @@ function Submerged.Configure(P, cfg)
     local s = P.s.submerged
     if not s then return end
     P.cfg = cfg
+    fullCoords(P, P.base)
     tintSubmerged(P, s)
     if s.lastI ~= cfg.intensity then
         s.lastI = cfg.intensity
@@ -848,6 +900,7 @@ function Submerged.Refresh(P)
     local s = P.s.submerged
     if not s then return end
     setPortrait(P.base, P.unit)
+    fullCoords(P, P.base) -- SetPortraitTexture kann die TexCoords zuruecksetzen
     for _, t in ipairs(s.copies) do setPortrait(t, P.unit) end
     tintSubmerged(P, s)
     Submerged.UpdateDead(P)
@@ -896,7 +949,7 @@ function Submerged.React(P, what, arg)
 end
 
 -- Gemeinsame Hilfen fuer Stile in eigenen Dateien (E6 PortraitModel.lua): dieselben secret-sicheren Bausteine wie oben
-Portrait.Util = { call = call, readFlag = readFlag, recordError = recordError, newMask = newMask, addMask = addMask, layer = layer,
+Portrait.Util = { texCoord = texCoord, fullCoords = fullCoords, fullCoordsAll = fullCoordsAll, unmirror = unmirror, call = call, readFlag = readFlag, recordError = recordError, newMask = newMask, addMask = addMask, layer = layer,
     curvesFor = curvesFor, curveAlpha = curveAlpha, readableFraction = readableFraction, evalPoints = evalPoints,
     flashGroup = flashGroup, flash = flash, liquidColor = liquidColor, setDesaturated = setDesaturated, stats = stats }
 
@@ -919,7 +972,25 @@ function Portrait.StyleKeys()
     return out
 end
 
+-- "flat" (intern, nicht waehlbar): statisches Bild, aber gespiegelt (static + mirror); P.base im runden Portrait-Frame
+local Flat = { flat = true, noGloss = true }
+function Flat.Activate(P, cfg)
+    P.cfg = cfg
+    call(P.base, "Show")
+    Flat.Refresh(P)
+end
+function Flat.Configure(P, cfg)
+    P.cfg = cfg
+    fullCoords(P, P.base)
+end
+function Flat.Refresh(P)
+    setPortrait(P.base, P.unit)
+    fullCoords(P, P.base) -- SetPortraitTexture kann die TexCoords zuruecksetzen
+end
+function Flat.Deactivate(P) unmirror(P.base) end
+
 Portrait.RegisterStyle("static", { static = true })
+Portrait.RegisterStyle("flat", Flat)
 Portrait.RegisterStyle("painting", Painting)
 Portrait.RegisterStyle("submerged", Submerged)
 
@@ -927,7 +998,8 @@ Portrait.RegisterStyle("submerged", Submerged)
 local KNOWN = { static = true, painting = true, submerged = true, model = true, modelplain = true } -- Modell-Stile bleiben gespeichert, auch ohne E6
 
 function Portrait.Defaults()
-    return { style = Portrait.DEFAULT.style, intensity = Portrait.DEFAULT.intensity }
+    local D = Portrait.DEFAULT
+    return { style = D.style, intensity = D.intensity, mirrorPlayer = D.mirrorPlayer, mirrorTarget = D.mirrorTarget }
 end
 
 --- Bereich pruefen: feldweise, ein ungueltiges Feld faellt auf seinen Standard (nie der ganze Bereich)
@@ -937,19 +1009,44 @@ function Portrait.Validate(t)
     if type(t.style) == "string" and KNOWN[t.style] then out.style = t.style end
     local x = t.intensity
     if type(x) == "number" and x == x and x >= 0 and x <= 1 then out.intensity = x end
+    for _, f in pairs(Portrait.MIRROR_FIELD) do
+        if type(t[f]) == "boolean" then out[f] = t[f] end
+    end
     return out
 end
 
-Skin.RegisterArea("portrait", { defaults = Portrait.Defaults, validate = Portrait.Validate })
+--- altes gemeinsames Feld mirror (erste 1.1.4-Fassung, "fuer alle" oder Eigenwert je Rahmen) in mirrorPlayer/mirrorTarget
+--- uebernehmen, solange das neue Feld nicht selbst gesetzt ist; der Eigenwert des Rahmens geht vor
+function Portrait.Migrate(out, raw)
+    local all = type(raw.portrait) == "table" and raw.portrait or nil
+    local function legacy(block)
+        if type(block) == "table" and type(block.mirror) == "boolean" then return block.mirror end
+        return nil
+    end
+    for id, f in pairs(Portrait.MIRROR_FIELD) do
+        if not (all and type(all[f]) == "boolean") then
+            local per = type(raw.per) == "table" and type(raw.per[id]) == "table" and raw.per[id].portrait or nil
+            local v = legacy(per)
+            if v == nil then v = legacy(all) end
+            if v ~= nil then out.portrait[f] = v end
+        end
+    end
+end
+
+Skin.RegisterArea("portrait", { defaults = Portrait.Defaults, validate = Portrait.Validate, migrate = Portrait.Migrate,
+    global = { "mirrorPlayer", "mirrorTarget" } })
 
 local function frameConfig(id)
     local ok, c = pcall(Skin.GetFrameConfig, id)
     local p = ok and type(c) == "table" and c.portrait or nil
-    return Portrait.Validate(p) or Portrait.Defaults()
+    local out = Portrait.Validate(p) or Portrait.Defaults()
+    local f = Portrait.MIRROR_FIELD[id]
+    out.mirror = f ~= nil and out[f] == true -- Blickrichtung dieses Rahmens
+    return out
 end
 
 --- wirksamer Stil eines Rahmens: ToT immer statisch; unbekannt => statisch; "model" ohne Anmeldung/bei Ausfall => painting
-local function resolveKey(P, id, cfg)
+local function resolveStyle(P, id, cfg)
     if not Portrait.UNIT[id] then return "static" end
     local key = cfg.style
     if key == "static" then return "static" end
@@ -967,6 +1064,13 @@ local function resolveKey(P, id, cfg)
         local ok, usable = pcall(impl.Usable, P)
         if ok and usable == false then return "painting" end
     end
+    return key
+end
+
+--- dazu die Blickrichtung: statisch und gespiegelt => "flat" (nur Spieler und Ziel)
+local function resolveKey(P, id, cfg)
+    local key = resolveStyle(P, id, cfg)
+    if key == "static" and cfg.mirror == true and Portrait.UNIT[id] and STYLES.flat then return "flat" end
     return key
 end
 
@@ -1168,7 +1272,7 @@ function Portrait.Attach(sk, id)
     id = id or sk.id
     local P = sk.pfx
     local cfg = frameConfig(id)
-    if cfg.style == "static" or not Portrait.UNIT[id] then -- Standard: nichts anlegen, nichts anfassen
+    if (cfg.style == "static" and cfg.mirror ~= true) or not Portrait.UNIT[id] then -- Standard: nichts anlegen, nichts anfassen
         if P and P.impl then deactivate(P) end
         return
     end
@@ -1179,6 +1283,7 @@ function Portrait.Attach(sk, id)
         return
     end
     P.cfg = cfg
+    P.mirror = cfg.mirror == true
     layoutState(P)
     if P.key ~= key then
         if P.impl then callImpl(P, "Deactivate") end
@@ -1253,7 +1358,7 @@ local function testStates()
     local list = {}
     for _, id in ipairs({ "player", "target" }) do
         local P = activeState(id)
-        if P then list[#list + 1] = P end
+        if P and not P.impl.flat then list[#list + 1] = P end -- gespiegeltes statisches Bild: nichts zu testen
     end
     return list
 end

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.4
+
+- Target buffs and debuffs now wrap into further rows like Blizzard's, instead of stopping after one row.
+- On Forever, Blizzard's small faction crest at the side of the portrait no longer shows next to our crest.
+- New "Facing" option on the Portrait tab, separately for the player and the target: mirror the portrait of every style so it looks the other way; models show their mirrored view.
+
 ## 1.1.3
 
 - New option "Countdown to regeneration" on the Liquid tab (off by default): after each spell a small ring next to your mana tube fills up over the five seconds until mana regeneration resumes, optionally with the seconds shown.

@@ -18,8 +18,11 @@
 --     den Plaketten (Style.QuestSymbol: Questie zuerst, sonst "!" ueber C_QuestLog). Zeigt Lucid ein Questie-Symbol,
 --     wird Questies eigenes Symbol am Zielrahmen (profile.nameplateTargetFrameEnabled) per SetAlpha(0) verborgen.
 --   * Stufen-Plakette mit Edelstein in Schwierigkeitsfarbe (nur angreifbare Ziele, sonst neutral).
---   * Auren: eigener CustomAuraContainer (Blizzard rechnet secret intern), runde Fassungen in je einer Reihe Debuffs und
---     Buffs unter den Roehren; fehlt die Vorlage, bleiben Blizzards Auren sichtbar. Groesse: unitframes.auraSize (Standard 22,
+--   * Auren: eigener CustomAuraContainer (Blizzard rechnet secret intern), runde Fassungen, Debuffs und Buffs je als eigener
+--     Block unter den Roehren, der wie bei Blizzard in weitere Reihen umbricht (Hotfix 1.1.4: frueher begrenzte
+--     maxFrameCount jede Gruppe auf eine Reihe, weitere Auren fehlten). Der Flow-Layout bricht an der Reihenbreite
+--     (SetFlowLayoutMaximumLineSize = Roehrenbreite) um; Hoechstzahl wie Blizzard MAX_TARGET_DEBUFFS/BUFFS (16/32).
+--     Fehlt die Vorlage, bleiben Blizzards Auren sichtbar. Groesse: unitframes.auraSize (Standard 22,
 --     14-36, /vials auren), wirkt sofort (vorhandene Knoepfe werden umdimensioniert).
 --     Blizzards Auren (TargetFrameContent.TargetFrameContentContextual.Auras) sind nur per SetAlpha(0) unsichtbar, ihre
 --     AuraButtons fangen aber weiter die Maus (Tooltips an leeren Stellen, ueber den eigenen Symbolen der Tooltip einer
@@ -79,14 +82,18 @@ Deco.GEM_NEUTRAL = { 0.80, 0.76, 0.70 }
 Deco.GEM_TEST = { 1.0, 0.50, 0.25 }
 -- Auren: Symbolgroesse aus dem Profil (unitframes.auraSize, Skin.AURA_SIZE); gap/rowGap gelten bei refSize und wachsen
 -- proportional mit. Abstand unter der Roehre, Anteil der Innenflaeche fuers Symbol
-Deco.AURA = { refSize = 18, gap = 2, rowGap = 3, top = 3, iconFill = 1.04, perRowMax = 12 }
+-- maxDebuffs/maxBuffs: Rueckfall, wenn Blizzards MAX_TARGET_DEBUFFS/MAX_TARGET_BUFFS fehlen (TargetFrameAuraShared.lua)
+Deco.AURA = { refSize = 18, gap = 2, rowGap = 3, top = 3, iconFill = 1.04, perRowMax = 12, maxDebuffs = 16, maxBuffs = 32 }
 -- Ebenen: Schild = Blizzards Container + shieldLift (ueber dessen Knoepfen), eigener Container = Schild + ownLift;
 -- ohne lesbare Ebene des Blizzard-Containers: Wurzel + levelFallback
 Deco.AURA_LEVEL = { shieldLift = 4, ownLift = 2, levelFallback = 12 }
 Deco.SHIELD_TEMPLATE = "DisableUntrustedLayoutScriptsTemplate"
--- PvP-Abzeichen: Blizzard-Teile (parentKeys beider Rahmen; fehlende sind kein Befund), Lage (Grad gegen den Uhrzeigersinn ab
+-- PvP-Abzeichen: Blizzard-Teile (parentKeys beider Rahmen; fehlende sind kein Befund). PvpBackgroundIcon (Hotfix 1.1.4):
+-- Forevers Camelot-Rahmen zeigen statt PVPIcon/PvpIcon einen kleinen Fraktionskreis (UI-HUD-UnitFrame-SmallCircle-*) unten
+-- seitlich am Portrait (PlayerFrameContentMain bzw. TargetFrameContentContextual, GetPvPIndicatorElements in
+-- Camelot/PlayerFrame.lua und Camelot/TargetFrame.lua); Retail hat die Textur nur leer und nie gezeigt, Lage (Grad gegen den Uhrzeigersinn ab
 -- rechts, ungespiegelt; das Ziel spiegelt), Fassung (x Ringgroesse) und Wappen (x Fassung), Wappen je Fraktion
-Deco.PVP_KEYS = { "PVPIcon", "PvpIcon", "PrestigePortrait", "PrestigeBadge" }
+Deco.PVP_KEYS = { "PVPIcon", "PvpIcon", "PrestigePortrait", "PrestigeBadge", "PvpBackgroundIcon" }
 Deco.PVP = { angle = 148, sock = 0.27, icon = 0.82 }
 Deco.PVP_ATLAS = { Horde = "UI-HUD-UnitFrame-Player-PVP-HordeIcon", Alliance = "UI-HUD-UnitFrame-Player-PVP-AllianceIcon",
     FFA = "UI-HUD-UnitFrame-Player-PVP-FFAIcon" }
@@ -405,6 +412,15 @@ local function auraFallback(sk)
     if r and sk.hidden and sk.hidden[r] then Skin.ShowRegion(sk, r) end
 end
 
+--- Hoechstzahl je Gruppe wie Blizzards Zielrahmen (Zahl aus dessen Globals, sonst Rueckfall)
+local function auraMax(key)
+    local A = Deco.AURA
+    local g = key == "buffs" and _G.MAX_TARGET_BUFFS or _G.MAX_TARGET_DEBUFFS
+    if type(g) == "number" and g >= 1 and g <= 64 and g == math.floor(g) then return g end
+    return key == "buffs" and A.maxBuffs or A.maxDebuffs
+end
+Deco.AuraMax = auraMax
+
 local function auraLayout(index, newLine)
     local s, gap, rowGap = auraMetrics()
     return { elementSpacing = gap, lineSpacing = rowGap, elementWidth = s, elementHeight = s,
@@ -470,14 +486,14 @@ local function buildAuras(sk)
     local shieldL, ownL = auraLevels(sk)
     call(c, "SetFrameLevel", ownL)
     local sortM, sortD = _G.AuraContainerSortMethod, _G.AuraContainerSortDirection
-    local dOpts = { initializeFrame = initAura, maxFrameCount = Deco.AURA.perRowMax, layout = auraLayout(1, false) }
+    local dOpts = { initializeFrame = initAura, maxFrameCount = auraMax("debuffs"), layout = auraLayout(1, false) }
     if type(sortM) == "table" and type(sortD) == "table" and sortM.UnitFrameDebuff and sortD.Normal then
         dOpts.sortMethod, dOpts.sortDirection = sortM.UnitFrameDebuff, sortD.Normal -- eigene Schwaechungen zuerst
     end
     local okU = call(c, "SetUnit", "target")
     local ok1 = call(c, "AddAuraGroup", "debuffs", "HARMFUL", dOpts)
     local ok2 = call(c, "AddAuraGroup", "buffs", "HELPFUL",
-        { initializeFrame = initAura, maxFrameCount = Deco.AURA.perRowMax, layout = auraLayout(2, true) })
+        { initializeFrame = initAura, maxFrameCount = auraMax("buffs"), layout = auraLayout(2, true) })
     if not (okU and ok1 and ok2) then
         pcall(c.Hide, c)
         sk.auraState = "failed"
@@ -605,10 +621,10 @@ local function layoutAuras(sk)
     c:ClearAllPoints()
     c:SetPoint("TOPLEFT", lb.root, "TOPLEFT", 0, -((lb.h or 10) + (pad.bottom or 0) + A.top))
     local w = lb.w or Skin.SPEC.target.health[1]
+    -- Umbruch macht Blizzards Flow-Layout an der Reihenbreite; je_reihe (/vials debug) ist nur die Anzeige, wie viele
+    -- Symbole in eine Reihe passen. Die Hoechstzahl bleibt fest (keine Begrenzung auf eine Reihe)
     local n = math.max(1, math.min(A.perRowMax, math.floor((w + gap) / (size + gap))))
     call(c, "SetFlowLayoutMaximumLineSize", w)
-    call(c, "SetAuraGroupMaxFrameCount", "debuffs", n)
-    call(c, "SetAuraGroupMaxFrameCount", "buffs", n)
     sk.auraPerRow = n
 end
 

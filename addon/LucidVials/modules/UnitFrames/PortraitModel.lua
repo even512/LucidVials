@@ -43,6 +43,16 @@
 -- Antrieb: nach jedem Liquid.SyncFadeAll (Skin.lua ruft es nach SetAlpha/SetAlphaFromBoolean des Rahmens), je Bild ueber Liquid.SyncFade der Lebensroehre (Nachher-Hooks
 -- auf die eigene Liquid-Tabelle) und unabhaengig davon ein gedrosselter Takt (POLL) am eigenen Treiber-Frame, solange das Modell aktiv ist.
 --
+-- Blickrichtung (Hotfix 1.1.4, P.mirror aus Portrait.lua): Modelle lassen sich nicht per TexCoord spiegeln. Gespiegelt wird die
+-- Ansicht an der Kamera-Achse gespiegelt: Grundrichtung f0 (GetFacing direkt nach SetUnit, lesbar; sonst 0), Kamerarichtung
+-- c = atan2 der Kamera gegenueber ihrem Ziel (GetCameraPosition/GetCameraTarget, gleicher Raum wie die Drehung des Modells),
+-- dann facing = 2c - f0 (das Modell steht um denselben Winkel schraeg, nur zur anderen Seite). Ist die Kamera nicht lesbar oder
+-- ergaebe das keine Drehung (< MIRROR_MIN), gilt die Annahme Model.MIRROR_TURN (Dreiviertelansicht 45 Grad => 90 Grad Drehung).
+-- Neu gerechnet nach jeder Bindung und bei OnModelLoaded (die Portrait-Kamera steht erst mit geladenem Modell); zurueck auf die
+-- Grundrichtung, sobald die Option aus ist oder der Stil endet. Ungespiegelt wird SetFacing nie gerufen (Standard unveraendert).
+-- Feintuning im Spiel: /vials test drehen <rad> setzt die Drehung gegenueber f0 fest (alle aktiven Modelle, sofort), ohne Zahl
+-- nur Ausgabe (GetFacing, f0, Kamera, Drehung, Quelle), "aus" zurueck auf die Rechnung. Abdeckung, Grund und Kreismaske sind rund und
+-- bleiben, die Effekt-Lagen (Vignette, Risse, Blitze) und das statische Bild im Rueckfall ("modelplain") spiegeln per TexCoord.
 -- Mini-Vorschau (Preview.lua, P.preview, impl.previewSafe): dasselbe Modell in der Buehne mit der Einheit "player" als Bild. Dort keine
 -- eigenen Ereignisse, kein Takt, keine Root-Hooks (s.root = nil), kein arm/Portrait.Fallback (Rueckfall nur lokal: statisches Bild);
 -- Pegel aus P.fakeFraction, Tod aus P.fakeDead, Kampf nur ueber React("combat"); Reaktionen kommen ueber React der Buehne.
@@ -66,6 +76,11 @@ Portrait.ModelPlain = Plain
 -- Schultern auch bei Treffer/Zaubern/Lachen im Kreis bleiben
 Model.ZOOM = 0.85
 Model.CAM_DISTANCE = 1.25
+-- Blickrichtung gespiegelt: Annahme fuer die Drehung gegenueber der Grundrichtung, wenn die Kamera nicht lesbar ist (Bogenmass);
+-- MIRROR_MIN: kleinere gerechnete Drehungen gelten als "Kamera unbrauchbar"
+Model.MIRROR_TURN = math.pi / 2
+Model.MIRROR_MIN = 0.05
+Model.turnOverride = nil -- /vials test drehen <rad> (nur Feintuning, nicht gespeichert)
 Model.SIZE = 0.84          -- Kantenlaenge des Modell-Quadrats / Portrait (Ecken unter dem Ringband, Kanten unter der Abdeckung)
 Model.COVER_TEX = "Interface\\AddOns\\LucidVials\\Media\\uf-portrait-model-cover"
 Model.BACKDROP = { 0.035, 0.04, 0.05, 1 }
@@ -159,6 +174,60 @@ function Model.CanShow(unit, m)
     return true
 end
 
+local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+
+--- Winkel auf (-pi, pi]
+local function normAngle(a)
+    local tp = 2 * math.pi
+    a = a % tp
+    if a > math.pi then a = a - tp end
+    return a
+end
+
+--- Kamerarichtung (vom Ziel zur Kamera, waagerecht) oder nil, wenn nicht lesbar
+local function cameraYaw(m)
+    local ok1, px, py = call(m, "GetCameraPosition")
+    local ok2, tx, ty = call(m, "GetCameraTarget")
+    px, py = ok1 and Compat.Num(plain(px)) or nil, ok1 and Compat.Num(plain(py)) or nil
+    tx, ty = ok2 and Compat.Num(plain(tx)) or nil, ok2 and Compat.Num(plain(ty)) or nil
+    if not (px and py and tx and ty) then return nil end
+    local dx, dy = px - tx, py - ty
+    if math.abs(dx) + math.abs(dy) < 1e-6 then return nil end
+    return atan2(dy, dx)
+end
+Model.CameraYaw = cameraYaw
+
+--- Drehung gegenueber f0 und ihre Quelle: "test" (Feintuning), "kamera" (2c - 2f0), "annahme" (MIRROR_TURN)
+local function mirrorTurn(s, f0)
+    s.camYaw = cameraYaw(s.model)
+    if Model.turnOverride then return Model.turnOverride, "test" end
+    if s.camYaw then
+        local d = normAngle(2 * (s.camYaw - f0))
+        if math.abs(d) >= Model.MIRROR_MIN then return d, "kamera" end
+    end
+    return Model.MIRROR_TURN, "annahme"
+end
+
+--- Blickrichtung: gespiegelt an der Kamera-Achse (bzw. Feintuning-Wert); aus => zurueck auf die Grundrichtung (nur, wenn gedreht)
+local function applyFacing(P, s)
+    local m = s.model
+    if P.mirror or Model.turnOverride then
+        local okF, f = call(m, "GetFacing")
+        f = okF and Compat.Num(plain(f)) or nil
+        -- liess SetUnit die eigene Drehung stehen, bleibt die gemerkte Grundrichtung (kein Aufaddieren)
+        if f and s.facingSet and math.abs(f - s.facingSet) < 1e-4 then f = s.facing0 end
+        s.facing0 = f or s.facing0 or 0
+        s.turn, s.turnSrc = mirrorTurn(s, s.facing0)
+        s.facingSet = s.facing0 + s.turn
+        call(m, "SetFacing", s.facingSet)
+    elseif s.facingSet then
+        call(m, "SetFacing", s.facing0 or 0)
+        s.facingSet = nil
+    end
+    s.mirror = P.mirror
+end
+Model.ApplyFacing = applyFacing
+
 --- Modell an die Einheit binden (pcall); false + Grund, wenn es scheitert
 local function bind(P, s)
     local m = s.model
@@ -172,6 +241,7 @@ local function bind(P, s)
     call(m, "SetCamDistanceScale", Model.CAM_DISTANCE)
     call(m, "SetPosition", 0, 0, 0)
     call(m, "SetParticlesEnabled", false)
+    applyFacing(P, s)
     return true
 end
 
@@ -509,6 +579,7 @@ local function still(P, s, on)
     if on then
         call(s.model, s.hasModelAlpha and "SetModelAlpha" or "SetAlpha", 0)
         if type(SetPortraitTexture) == "function" then pcall(SetPortraitTexture, P.base, P.unit, true) end
+        U.fullCoords(P, P.base) -- Blickrichtung auch im statischen Bild
         call(P.base, "Show")
     else
         call(P.base, "Hide")
@@ -698,6 +769,10 @@ local function build(P)
         s.dimAnim = okA and a or nil
         call(s.dimAnim, "SetSmoothing", "IN_OUT")
     end
+    -- Portrait-Kamera steht erst mit geladenem Modell: Blickrichtung dann neu rechnen (Handler fehlt => nur beim Binden)
+    pcall(m.SetScript, m, "OnModelLoaded", function()
+        if s.active and (P.mirror or Model.turnOverride) then measure(applyFacing, P, s) end
+    end)
     m:SetScript("OnAnimFinished", function()
         if s.react then measure(settle, P, s) end
     end)
@@ -854,6 +929,7 @@ local function activate(P, cfg, isPlain)
         P.s.model = s
     end
     P.cfg = cfg
+    s.P = P
     s.plain, s.preview = isPlain, P.preview == true
     s.active = false -- OnShow bindet erst, wenn alles steht (Refresh unten)
     s.combat = readCombat(P)
@@ -886,8 +962,13 @@ function Model.Activate(P, cfg) activate(P, cfg, false) end
 
 function Model.Deactivate(P)
     local s = P.s.model
+    U.unmirror(P.base)
     call(P.base, "Show")
     if not s then return end
+    if s.facingSet then -- Drehung zuruecknehmen (das naechste SetUnit muss sie nicht zuruecksetzen)
+        call(s.model, "SetFacing", s.facing0 or 0)
+        s.facingSet = nil
+    end
     s.active = false
     live[s] = nil
     drive(s, false)
@@ -938,6 +1019,9 @@ function Model.Configure(P, cfg)
     local s = P.s.model
     if not s then return end
     P.cfg = cfg
+    U.fullCoordsAll(P, s.overlays)
+    if s.still then U.fullCoords(P, P.base) end
+    if s.mirror ~= P.mirror and s.boundAt and s.active then applyFacing(P, s) end -- umgeschaltet: ohne neu zu binden
     s.vig:SetAlpha(s.plain and 0 or Model.VIGNETTE * cfg.intensity)
     tint(P, s)
     updateLow(P, s)
@@ -1050,6 +1134,39 @@ function Model.Debug()
     end
     ns.Print("frames.portrait.model.cost setUnit=%d fails=%d fallbacks=%d retries=%d anims=%d events=%d avgMs=%.3f maxMs=%.3f",
         mstats.setUnit, mstats.fails, mstats.fallbacks, mstats.retries, mstats.anims, mstats.events, mstats.ms, mstats.msMax)
+end
+
+--- /vials test drehen [<rad>|aus]: Feintuning der Drehung (nicht gespeichert), Ausgabe je aktivem Modell
+function Model.TurnCommand(arg)
+    arg = type(arg) == "string" and arg:match("^%s*(.-)%s*$") or ""
+    if arg == "aus" or arg == "off" then
+        Model.turnOverride = nil
+    elseif arg ~= "" then
+        local v = tonumber((arg:gsub(",", ".")))
+        if not v or v ~= v or math.abs(v) > 2 * math.pi then
+            ns.Print("frames.drehen: /vials test drehen <-6.28..6.28> | aus")
+            return
+        end
+        Model.turnOverride = v
+    end
+    local n = 0
+    for s in pairs(live) do
+        local P = s.P
+        if P and s.active then
+            if arg ~= "" then measure(applyFacing, P, s) end
+            local okF, f = call(s.model, "GetFacing")
+            f = okF and Compat.Num(plain(f)) or nil
+            ns.Print("frames.drehen %s facing=%s grund=%s kamera=%s drehung=%s quelle=%s gespiegelt=%s", tostring(P.id),
+                f and string.format("%.3f", f) or "-", s.facing0 and string.format("%.3f", s.facing0) or "-",
+                s.camYaw and string.format("%.3f", s.camYaw) or "-", s.turn and string.format("%.3f", s.turn) or "-",
+                tostring(s.facingSet and s.turnSrc or "-"), P.mirror and "ja" or "nein")
+            n = n + 1
+        end
+    end
+    if n == 0 then ns.Print("frames.drehen: kein Modell-Portrait aktiv (Stil Modell waehlen)") end
+end
+if ns.UnitFrameSkin and ns.UnitFrameSkin.RegisterTest then
+    ns.UnitFrameSkin.RegisterTest("drehen", function(rest) Model.TurnCommand(rest) end)
 end
 
 -- "Animiertes Modell (schlicht)": derselbe Code, nur Ruhe, keine Effekte; Rueckfall auf das statische Bild im eigenen Rahmen

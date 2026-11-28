@@ -12,6 +12,8 @@
 --     ohne Anmeldung (Modul fehlt) wird unveraendert durchgereicht, andere unbekannte Felder fallen weg.
 --   * Globale Felder eines Bereichs (liquid.slosh*: die Bewegungsphysik ist eine fuer alle Roehren) kommen immer aus "fuer alle".
 --   * Das Element "xp" (text/font) gibt es nur unter "fuer alle"; Portrait-Eigenwerte nur fuer Spieler und Ziel.
+--   * Optional def.migrate(out, raw) je Bereich: nach der Pruefung des ganzen Abschnitts alte Felder aus der Rohfassung
+--     uebernehmen (z. B. portrait.mirror -> mirrorPlayer/mirrorTarget, Hotfix 1.1.4).
 local _, ns = ...
 local Store = ns.Store
 
@@ -54,7 +56,7 @@ function Schema.RegisterArea(name, def)
         "LucidVials: Bereich fehlt, ist reserviert oder doppelt: " .. tostring(name))
     assert(type(def) == "table" and type(def.defaults) == "function" and type(def.validate) == "function",
         "LucidVials: Bereich braucht defaults und validate: " .. name)
-    areas[name] = { defaults = def.defaults, validate = def.validate,
+    areas[name] = { defaults = def.defaults, validate = def.validate, migrate = def.migrate,
         frames = toSet(def.frames) or Schema.AREA_FRAMES[name], global = toSet(def.global) or {} }
     areaOrder[#areaOrder + 1] = name
 end
@@ -191,6 +193,10 @@ function Schema.Validate(v)
         elseif type(k) == "string" and Schema.CONTRACT_AREAS[k] and type(x) == "table" then
             out[k] = copy(x) -- Bereich ohne Anmeldung (Modul fehlt): unveraendert durchreichen
         end -- unbekannte Felder fallen weg
+    end
+    for _, name in ipairs(areaOrder) do
+        local mig = areas[name].migrate
+        if type(mig) == "function" and type(out[name]) == "table" then pcall(mig, out, v) end
     end
     return out, bad
 end

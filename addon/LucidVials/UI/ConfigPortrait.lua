@@ -2,6 +2,8 @@
 -- im Kolben versunken, ggf. reagierendes Modell) und Staerke der Effekte, "fuer alle" oder je Rahmen (nur Spieler und Ziel, der
 -- Rahmen-Waehler W.FrameScope kommt aus UI/ConfigWidgets.lua). Alle Werte gehen ueber Skin.Set (Pruefung, Profil, sofort anwenden);
 -- die Vorschau steht in der Spalte rechts (UI/ConfigPreview.lua). Fasst keine Blizzard-Frames an; im Kampf bedienbar.
+-- Hotfix 1.1.4: "Blickrichtung" mit je einer Auswahl fuer Spieler und Ziel (portrait.mirrorPlayer/mirrorTarget, globale Felder:
+-- immer getrennt, unabhaengig vom Rahmen-Waehler; Standard = wie bisher), fuer alle Stile (auch statisch).
 local _, ns = ...
 local Skin, Portrait = ns.UnitFrameSkin, ns.UnitPortrait
 local Config, W = ns.Config, ns.Widgets
@@ -20,6 +22,12 @@ Tab.DESC = { static = "UI_PORTRAIT_DESC_STATIC", painting = "UI_PORTRAIT_DESC_PA
 
 local function pctFmt(v) return ("%d %%"):format(v) end
 
+-- Blickrichtung: Auswahlwerte <-> portrait.mirror
+Tab.FACING = { { value = "normal", label = "UI_PORTRAIT_FACING_NORMAL", mirror = false },
+    { value = "mirrored", label = "UI_PORTRAIT_FACING_MIRRORED", mirror = true } }
+local function facingValue(mirror) return mirror == true and "mirrored" or "normal" end
+Tab.FacingValue = facingValue
+
 local function setStatus(page, text, c)
     page.status:SetText(text or "")
     W.Color(page.status, c or C.muted)
@@ -34,6 +42,14 @@ local function set(page, path, value)
     end
     Config.Refresh()
 end
+
+--- globales Feld (Blickrichtung): immer "fuer alle" gespeichert, gilt trotzdem nur fuer seinen Rahmen
+local function setAll(page, path, value)
+    if Skin.Set(path, value) then setStatus(page, "") else setStatus(page, L.FRAMES_VALUE_INVALID, C.warn) end
+    Config.Refresh()
+end
+
+local FRAME_LABEL_KEY = { player = "UI_FRAMES_PLAYER", target = "UI_FRAMES_TARGET" }
 
 --- Auswahlliste: angemeldete Stile; ein gespeicherter, aber nicht angemeldeter Stil (z. B. Modell ohne Modul) bleibt sichtbar, gesperrt
 local function styleOptions(current)
@@ -97,6 +113,26 @@ Config.RegisterPage("portrait", {
         page.style = W.Dropdown(page, 260, function(v) set(page, "portrait.style", v) end)
         page.style:SetPoint("TOPLEFT", 4, -108)
         W.Tooltip(page.style, function() return L.UI_PORTRAIT_STYLE, L.UI_PORTRAIT_STYLE_TIP end)
+        local fopts = {}
+        for _, o in ipairs(Tab.FACING) do fopts[#fopts + 1] = { value = o.value, text = L[o.label] } end
+        page.facing = {}
+        for i, id in ipairs(Tab.FRAMES) do
+            local field = Portrait.MIRROR_FIELD[id]
+            local x = 300 + (i - 1) * 200
+            local flbl = W.Text(page, "GameFontNormalSmall", C.muted)
+            flbl:SetPoint("TOPLEFT", x, -92)
+            flbl:SetText(L.UI_PORTRAIT_FACING .. ": " .. L[FRAME_LABEL_KEY[id]])
+            local dd = W.Dropdown(page, 180, function(v)
+                for _, o in ipairs(Tab.FACING) do
+                    if o.value == v then setAll(page, "portrait." .. field, o.mirror) end
+                end
+            end)
+            dd:SetPoint("TOPLEFT", x, -108)
+            dd:SetOptions(fopts)
+            dd:SetDefault(function() return facingValue(W.DefaultValue("portrait." .. field)) end)
+            W.Tooltip(dd, function() return L.UI_PORTRAIT_FACING, L.UI_PORTRAIT_FACING_TIP end)
+            page.facing[id] = dd
+        end
         page.desc = W.Text(page, "GameFontHighlightSmall", C.text)
         page.desc:SetPoint("TOPLEFT", 4, -140)
         page.desc:SetWidth(700)
@@ -133,6 +169,9 @@ Config.RegisterPage("portrait", {
         end
         page.style:SetValue(pc.style)
         page.intensity:SetValue(math.floor(pc.intensity * 100 + 0.5))
+        local all = Skin.GetConfig()
+        local ap = type(all) == "table" and type(all.portrait) == "table" and all.portrait or Portrait.Defaults()
+        for id, dd in pairs(page.facing) do dd:SetValue(facingValue(ap[Portrait.MIRROR_FIELD[id]])) end -- immer je Rahmen
         local own = not page.scope:IsInherited()
         page.style:SetActive(own)
         page.intensity:SetActive(own and pc.style ~= "static")
